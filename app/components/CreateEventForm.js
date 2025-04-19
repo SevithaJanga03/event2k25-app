@@ -4,15 +4,19 @@ import {
   ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import ModalDropdown from 'react-native-modal-dropdown';
-import { db, storage } from '../../firebaseConfig';
+import { db } from '../../firebaseConfig';
 import { addDoc, collection, Timestamp } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import * as Crypto from 'expo-crypto';
+import { useRouter } from 'expo-router'; // ✅ redirect support
+
+const imgbbApiKey = '642ff87b12fdccc4709d73200f05dba6'; // ← Replace with your real key
 
 export default function CreateEventForm() {
+  const router = useRouter();
+
   const [formData, setFormData] = useState({
     eventName: '',
     description: '',
@@ -41,87 +45,102 @@ export default function CreateEventForm() {
 
   const validate = () => {
     const newErrors = {};
+
     if (!formData.eventName.trim()) newErrors.eventName = 'Event name is required.';
     if (!formData.description.trim()) newErrors.description = 'Description is required.';
     if (!formData.location.trim()) newErrors.location = 'Location is required.';
     if (!formData.category) newErrors.category = 'Category is required.';
+
+    if (formData.maxAttendees) {
+      const num = parseInt(formData.maxAttendees);
+      if (isNaN(num)) {
+        newErrors.maxAttendees = 'Must be a number.';
+      } else if (num < 1 || num > 50) {
+        newErrors.maxAttendees = 'Must be between 1 and 50.';
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const pickImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission required', 'Allow access to photo library to upload an image.');
+      return;
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [4, 3],
       quality: 0.8,
     });
-    if (!result.canceled) {
+
+    if (!result.canceled && result.assets.length > 0) {
       setImage(result.assets[0].uri);
     }
   };
 
-  const generateFilename = async () => {
-    const random = await Crypto.digestStringAsync(
-      Crypto.CryptoDigestAlgorithm.SHA256,
-      Date.now().toString()
-    );
-    return `events/${random}.jpg`;
-  };
+  const uploadToImgbb = async (uri) => {
+    try {
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
 
-  const uploadImage = async (uri) => {
-    const response = await fetch(uri);
-    const blob = await response.blob();
-    const filename = await generateFilename();
-    const storageRef = ref(storage, filename);
-    await uploadBytes(storageRef, blob);
-    return await getDownloadURL(storageRef);
+      const formData = new FormData();
+      formData.append('key', imgbbApiKey);
+      formData.append('image', base64);
+
+      const res = await fetch('https://api.imgbb.com/1/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      return data?.data?.url || 'default';
+    } catch (err) {
+      console.error('Image upload failed:', err);
+      return 'default';
+    }
   };
 
   const handleSubmit = async () => {
     if (!validate()) return;
-  
+
     const auth = getAuth();
     const user = auth.currentUser;
-  
+
     if (!user) {
       Alert.alert('🔒 Login Required', 'Please login to create an event.');
       return;
     }
-  
+
     setUploading(true);
-    let imageUrl = '';
-  
+    let imageUrl = 'default';
+
     try {
-      if (image && typeof image === 'string') {
-        try {
-          imageUrl = await uploadImage(image);
-        } catch (imgErr) {
-          console.warn("⚠️ Image upload failed, using default fallback.");
-        }
+      if (image) {
+        imageUrl = await uploadToImgbb(image);
       }
-  
+
       const newEvent = {
         ...formData,
+        maxAttendees: formData.maxAttendees ? parseInt(formData.maxAttendees) : 50,
         date: Timestamp.fromDate(date),
         time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
         createdBy: user.uid,
         createdAt: Timestamp.now(),
-        ...(imageUrl && { imageUrl }), // ✅ only include if exists
+        imageUrl,
       };
-  
+
       await addDoc(collection(db, 'events'), newEvent);
       Alert.alert('✅ Success', 'Event created successfully!');
-  
-      // Reset form
-      setFormData({
-        eventName: '',
-        description: '',
-        location: '',
-        category: '',
-        maxAttendees: '',
-      });
+      setFormData({ eventName: '', description: '', location: '', category: '', maxAttendees: '' });
       setImage(null);
+
+      router.replace('/'); // ✅ Redirect to Explore
     } catch (error) {
       console.error('Error uploading event:', error);
       Alert.alert('❌ Error', 'Something went wrong. Please try again.');
@@ -129,12 +148,10 @@ export default function CreateEventForm() {
       setUploading(false);
     }
   };
-  
-  
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
           <Text style={styles.title}>Create Event</Text>
 
@@ -211,11 +228,13 @@ export default function CreateEventForm() {
           <Text style={styles.label}>Max Attendees (optional)</Text>
           <TextInput
             style={styles.input}
-            placeholder="e.g. 100"
+            placeholder="e.g. 50"
             keyboardType="numeric"
             value={formData.maxAttendees}
             onChangeText={(text) => handleChange('maxAttendees', text)}
           />
+          <Text style={styles.helper}>Min: 1, Max: 50 attendees</Text>
+          {errors.maxAttendees && <Text style={styles.error}>{errors.maxAttendees}</Text>}
 
           <Text style={styles.label}>Event Image (optional)</Text>
           <TouchableOpacity onPress={pickImage} style={styles.uploadBtn}>
@@ -239,26 +258,52 @@ export default function CreateEventForm() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f2f5' },
-  scroll: { padding: 16, paddingBottom: 80 },
+  container: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  scroll: {
+    padding: 16,
+    paddingBottom: 100,
+  },
   card: {
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 20,
+    marginVertical: 10,
     shadowColor: '#000',
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 10,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
   },
-  title: { fontSize: 20, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
-  label: { fontWeight: '600', marginTop: 12, marginBottom: 4, color: '#222' },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+    color: '#222',
+  },
+  label: {
+    fontWeight: '600',
+    marginTop: 14,
+    marginBottom: 6,
+    color: '#333',
+  },
   input: {
-    backgroundColor: '#f4f4f4',
+    backgroundColor: '#f2f2f2',
     padding: 12,
     borderRadius: 10,
+    fontSize: 15,
+  },
+  helper: {
+    fontSize: 12,
+    color: '#777',
+    marginTop: 4,
+    marginLeft: 4,
   },
   dropdown: {
-    backgroundColor: '#f4f4f4',
+    backgroundColor: '#f2f2f2',
     padding: 12,
     borderRadius: 10,
     justifyContent: 'center',
@@ -268,24 +313,49 @@ const styles = StyleSheet.create({
     height: 'auto',
     borderRadius: 8,
   },
-  dropdownText: { fontSize: 15, color: '#444' },
-  dropdownItemText: { padding: 12, fontSize: 14 },
-  error: { color: 'red', marginTop: 4, fontSize: 13 },
+  dropdownText: {
+    fontSize: 15,
+    color: '#333',
+  },
+  dropdownItemText: {
+    padding: 12,
+    fontSize: 14,
+  },
+  error: {
+    color: '#cc0000',
+    marginTop: 4,
+    fontSize: 13,
+    marginLeft: 4,
+  },
   uploadBtn: {
-    marginTop: 8,
-    backgroundColor: '#e0e0e0',
-    padding: 10,
-    borderRadius: 8,
+    marginTop: 10,
+    backgroundColor: '#eee',
+    padding: 12,
+    borderRadius: 10,
     alignItems: 'center',
   },
-  uploadText: { fontWeight: '600', color: '#333' },
-  imageName: { marginTop: 6, fontSize: 14, fontStyle: 'italic', color: '#555' },
+  uploadText: {
+    fontWeight: '600',
+    color: '#333',
+    fontSize: 15,
+  },
+  imageName: {
+    marginTop: 8,
+    fontSize: 13,
+    fontStyle: 'italic',
+    color: '#555',
+  },
   button: {
-    marginTop: 20,
+    marginTop: 24,
     backgroundColor: '#0055ff',
     paddingVertical: 14,
     borderRadius: 10,
     alignItems: 'center',
   },
-  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  buttonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
 });
+

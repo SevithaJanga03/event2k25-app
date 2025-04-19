@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 const tabs = [
   { title: 'Explore', path: '/', icon: 'compass-outline' },
-  { title: 'Create', path: '/create-event', icon: 'add-circle-outline' },
+  { title: 'Host', path: '/create-event', icon: 'add-circle-outline' },
   { title: 'Profile', path: '/profile', icon: 'person-outline' },
 ];
 

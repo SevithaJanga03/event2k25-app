@@ -23,7 +23,9 @@ export default function ExplorePage() {
     const fetchEvents = async () => {
       try {
         const snapshot = await getDocs(collection(db, 'events'));
+
         const today = new Date();
+        today.setHours(0, 0, 0, 0); // 🔥 normalize to midnight
 
         const fetched = snapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() }))
@@ -136,7 +138,7 @@ export default function ExplorePage() {
           data={filteredEvents}
           keyExtractor={item => item.id}
           renderItem={renderEvent}
-          contentContainerStyle={{ paddingBottom: 100 }}
+          contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 12}}
           showsVerticalScrollIndicator={false}
         />
       )}
@@ -145,7 +147,7 @@ export default function ExplorePage() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f8f8', padding: 16 },
+  container: { flex: 1, backgroundColor: '#ffffff', padding: 16 },
   searchBox: {
     backgroundColor: '#fff',
     paddingHorizontal: 16,
@@ -190,7 +192,7 @@ const styles = StyleSheet.create({
     shadowColor: '#000',
     shadowOpacity: 0.06,
     shadowRadius: 6,
-    elevation: 2,
+    elevation: 3,
   },
   image: {
     width: '100%',
