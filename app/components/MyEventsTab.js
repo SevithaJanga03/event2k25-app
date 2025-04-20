@@ -8,12 +8,14 @@ import {
   collection, query, where, getDocs, orderBy, doc, deleteDoc, updateDoc
 } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
+import MyEventModal from './MyEventModal'; // 👈 Ensure correct path
 
 export default function MyEventsTab() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [editEvent, setEditEvent] = useState(null);
+  const [viewEvent, setViewEvent] = useState(null); // 👈 NEW
   const [editLoading, setEditLoading] = useState(false);
   const [deleteLoadingId, setDeleteLoadingId] = useState(null);
 
@@ -95,8 +97,9 @@ export default function MyEventsTab() {
 
   const renderEvent = ({ item }) => {
     const dateObj = item.date?.seconds ? new Date(item.date.seconds * 1000) : new Date();
+
     return (
-      <View style={styles.card}>
+      <TouchableOpacity onPress={() => setViewEvent(item)} style={styles.card}>
         <Image
           source={
             item.imageUrl === 'default' || !item.imageUrl
@@ -131,7 +134,7 @@ export default function MyEventsTab() {
               : <Text style={styles.btnText}>Delete</Text>}
           </TouchableOpacity>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -208,6 +211,13 @@ export default function MyEventsTab() {
           </View>
         </View>
       </Modal>
+
+      {/* ✅ View Modal */}
+      <MyEventModal
+        visible={!!viewEvent}
+        event={viewEvent}
+        onClose={() => setViewEvent(null)}
+      />
     </View>
   );
 }
@@ -249,10 +259,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   editBtn: { backgroundColor: '#888' },
-  deleteBtn: { backgroundColor: '#0055ff' }, // app's primary blue
+  deleteBtn: { backgroundColor: '#0055ff' },
   btnText: { color: '#fff', fontWeight: '600' },
-
-  // Modal
   modalOverlay: {
     flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)',
   },

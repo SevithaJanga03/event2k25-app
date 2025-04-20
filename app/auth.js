@@ -15,7 +15,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
 } from 'firebase/auth';
-import { auth } from '../firebaseConfig';
+import { auth, db } from '../firebaseConfig';
+import { setDoc, doc } from 'firebase/firestore';
 
 export default function AuthScreen() {
   const [formType, setFormType] = useState('signup');
@@ -63,11 +64,9 @@ export default function AuthScreen() {
       if (
         code === 'auth/user-not-found' ||
         code === 'auth/wrong-password' ||
-        code === 'auth/invalid-login-credentials' || // ✅ fixed!
-        code === 'auth/invalid-credential' // handles some web errors
-      ) {
-        return 'Invalid email or password.';
-      }
+        code === 'auth/invalid-login-credentials' ||
+        code === 'auth/invalid-credential'
+      ) return 'Invalid email or password.';
       if (code === 'auth/invalid-email') return 'Invalid email format.';
       if (code === 'auth/network-request-failed') return 'Check your internet connection.';
       return 'An unexpected error occurred. Please try again.';
@@ -79,7 +78,6 @@ export default function AuthScreen() {
       return 'An unexpected error occurred. Please try again.';
     }
   };
-  
 
   const handleSubmit = async () => {
     if (validateForm()) {
@@ -90,6 +88,13 @@ export default function AuthScreen() {
             formData.email,
             formData.password
           );
+
+          // ✅ Store full name in Firestore under 'users' collection
+          await setDoc(doc(db, 'users', result.user.uid), {
+            fullName: formData.fullName,
+            email: formData.email,
+          });
+
           console.log('✅ Sign-up success:', result.user?.email);
           Alert.alert('🎉 Success', 'Account created successfully!');
           router.replace('/');
