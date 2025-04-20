@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, FlatList, StyleSheet, Image,
-  TouchableOpacity, ActivityIndicator, Modal, TextInput, Alert
+  TouchableOpacity, ActivityIndicator, Modal, TextInput,
+  KeyboardAvoidingView, Platform, ScrollView, Alert
 } from 'react-native';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import {
@@ -14,6 +15,7 @@ export default function MyEventsTab() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [editEvent, setEditEvent] = useState(null);
+  const [editErrors, setEditErrors] = useState({});
   const [editLoading, setEditLoading] = useState(false);
   const [deleteLoadingId, setDeleteLoadingId] = useState(null);
 
@@ -48,6 +50,51 @@ export default function MyEventsTab() {
     return () => unsubscribe();
   }, []);
 
+  const validateEditForm = () => {
+    const errors = {};
+    if (!editEvent.eventName.trim()) errors.eventName = 'Required';
+    if (!editEvent.description.trim()) errors.description = 'Required';
+    if (!editEvent.location.trim()) errors.location = 'Required';
+
+    const typed = parseInt(editEvent.maxAttendees);
+    const original = editEvent.originalMaxAttendees;
+
+    if (isNaN(typed)) {
+      errors.maxAttendees = 'Must be a number';
+    } else if (typed < original) {
+      errors.maxAttendees = `Cannot be less than current: ${original}`;
+    } else if (typed > 50) {
+      errors.maxAttendees = 'Cannot exceed 50';
+    }
+
+    setEditErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleSaveEdit = async () => {
+    if (!validateEditForm()) return;
+
+    setEditLoading(true);
+    try {
+      await updateDoc(doc(db, 'events', editEvent.id), {
+        eventName: editEvent.eventName,
+        description: editEvent.description,
+        location: editEvent.location,
+        maxAttendees: parseInt(editEvent.maxAttendees),
+      });
+
+      const updatedEvents = events.map(e =>
+        e.id === editEvent.id ? { ...editEvent } : e
+      );
+      setEvents(updatedEvents);
+      setEditEvent(null);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to update event.');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
   const handleDelete = async (eventId) => {
     Alert.alert('Confirm Delete', 'Are you sure you want to delete this event?', [
       { text: 'Cancel', style: 'cancel' },
@@ -58,8 +105,7 @@ export default function MyEventsTab() {
             await deleteDoc(doc(db, 'events', eventId));
             setEvents(events.filter(e => e.id !== eventId));
           } catch (err) {
-            console.error('Error deleting event:', err);
-            Alert.alert('Error', 'Failed to delete event');
+            Alert.alert('Error', 'Failed to delete event.');
           } finally {
             setDeleteLoadingId(null);
           }
@@ -68,56 +114,36 @@ export default function MyEventsTab() {
     ]);
   };
 
-  const handleSaveEdit = async () => {
-    if (!editEvent?.eventName.trim()) {
-      Alert.alert('Validation', 'Event name is required.');
-      return;
-    }
-
-    setEditLoading(true);
-    try {
-      await updateDoc(doc(db, 'events', editEvent.id), {
-        eventName: editEvent.eventName,
-        description: editEvent.description,
-        location: editEvent.location,
-        maxAttendees: Math.max(editEvent.maxAttendees, 1),
-      });
-
-      setEvents(events.map(e => (e.id === editEvent.id ? editEvent : e)));
-      setEditEvent(null);
-    } catch (err) {
-      console.error('Error updating event:', err);
-      Alert.alert('Error', 'Failed to update event.');
-    } finally {
-      setEditLoading(false);
-    }
+  const openEditModal = (item) => {
+    setEditErrors({});
+    setEditEvent({
+      ...item,
+      maxAttendees: item.maxAttendees?.toString() || '50',
+      originalMaxAttendees: item.maxAttendees,
+    });
   };
 
   const renderEvent = ({ item }) => {
     const dateObj = item.date?.seconds ? new Date(item.date.seconds * 1000) : new Date();
+
     return (
       <View style={styles.card}>
         <Image
-          source={
-            item.imageUrl === 'default' || !item.imageUrl
-              ? require('../../assets/images/default-event.png')
-              : { uri: item.imageUrl }
-          }
+          source={item.imageUrl === 'default' || !item.imageUrl
+            ? require('../../assets/images/default-event.png')
+            : { uri: item.imageUrl }}
           style={styles.image}
         />
         <Text style={styles.title}>{item.eventName}</Text>
         <Text style={styles.meta}>📍 {item.location}</Text>
         <Text style={styles.meta}>
-          📅 {dateObj.toDateString()} ⏰ {dateObj.toLocaleTimeString([], {
-            hour: '2-digit', minute: '2-digit', hour12: true,
-          })}
+          📅 {dateObj.toDateString()} ⏰ {dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
         </Text>
 
         <View style={styles.actions}>
           <TouchableOpacity
-            onPress={() => setEditEvent(item)}
-            style={[styles.actionBtn, styles.editBtn]}
-          >
+            onPress={() => openEditModal(item)}
+            style={[styles.actionBtn, styles.editBtn]}>
             <Text style={styles.btnText}>Edit</Text>
           </TouchableOpacity>
 
@@ -127,7 +153,7 @@ export default function MyEventsTab() {
             disabled={deleteLoadingId === item.id}
           >
             {deleteLoadingId === item.id
-              ? <ActivityIndicator size="small" color="#fff" />
+              ? <ActivityIndicator color="#fff" size="small" />
               : <Text style={styles.btnText}>Delete</Text>}
           </TouchableOpacity>
         </View>
@@ -148,72 +174,79 @@ export default function MyEventsTab() {
           data={events}
           renderItem={renderEvent}
           keyExtractor={item => item.id}
-          showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 12 }}
+          showsVerticalScrollIndicator={false}
         />
       )}
 
       {/* Edit Modal */}
       <Modal visible={!!editEvent} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Edit Event</Text>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 24 }}
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.modalTitle}>Edit Event</Text>
 
-            <Text style={styles.label}>Event Name</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editEvent?.eventName}
-              onChangeText={text => setEditEvent({ ...editEvent, eventName: text })}
-            />
+              {['eventName', 'description', 'location'].map(field => (
+                <View key={field} style={styles.fieldWrap}>
+                  <Text style={styles.label}>{field.replace(/([A-Z])/g, ' $1')}</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editEvent?.[field]}
+                    onChangeText={text => setEditEvent(prev => ({ ...prev, [field]: text }))}
+                  />
+                  {editErrors[field] && <Text style={styles.error}>{editErrors[field]}</Text>}
+                </View>
+              ))}
 
-            <Text style={styles.label}>Description</Text>
-            <TextInput
-              style={[styles.modalInput, { height: 80 }]}
-              multiline
-              value={editEvent?.description}
-              onChangeText={text => setEditEvent({ ...editEvent, description: text })}
-            />
+              <View style={styles.fieldWrap}>
+                <Text style={styles.label}>Max Attendees</Text>
+                <TextInput
+                  editable={editEvent?.originalMaxAttendees < 50}
+                  keyboardType="numeric"
+                  value={editEvent?.maxAttendees}
+                  onChangeText={text =>
+                    setEditEvent(prev => ({ ...prev, maxAttendees: text }))
+                  }
+                  style={[styles.modalInput, editEvent?.originalMaxAttendees >= 50 && { backgroundColor: '#eee' }]}
+                />
+                {editErrors.maxAttendees && (
+                  <Text style={styles.error}>{editErrors.maxAttendees}</Text>
+                )}
+              </View>
 
-            <Text style={styles.label}>Location</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editEvent?.location}
-              onChangeText={text => setEditEvent({ ...editEvent, location: text })}
-            />
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={styles.saveBtn}
+                  onPress={handleSaveEdit}
+                  disabled={editLoading}
+                >
+                  {editLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Save</Text>}
+                </TouchableOpacity>
 
-            <Text style={styles.label}>Max Attendees</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editEvent?.maxAttendees?.toString()}
-              keyboardType="numeric"
-              onChangeText={text => setEditEvent({ ...editEvent, maxAttendees: parseInt(text) })}
-            />
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.saveBtn}
-                onPress={handleSaveEdit}
-                disabled={editLoading}
-              >
-                {editLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Save</Text>}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={() => setEditEvent(null)}
-              >
-                <Text style={styles.btnText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
+                <TouchableOpacity
+                  style={styles.cancelBtn}
+                  onPress={() => setEditEvent(null)}
+                >
+                  <Text style={styles.btnText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#ffffff', paddingTop: 10 },
+  container: { flex: 1, backgroundColor: '#fff', paddingTop: 10 },
   card: {
     backgroundColor: '#fff',
     padding: 16,
@@ -227,32 +260,20 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   image: {
-    width: '100%',
-    height: 160,
-    borderRadius: 10,
-    marginBottom: 10,
-    backgroundColor: '#e0e0e0',
+    width: '100%', height: 160, borderRadius: 10, marginBottom: 10, backgroundColor: '#e0e0e0'
   },
   title: { fontSize: 18, fontWeight: '600', marginBottom: 4, color: '#333' },
   meta: { fontSize: 14, color: '#666', marginBottom: 2 },
   noEvents: { textAlign: 'center', marginTop: 60, fontSize: 16, color: '#999' },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 10,
-  },
+
+  actions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   actionBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginHorizontal: 4,
+    flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 4
   },
   editBtn: { backgroundColor: '#888' },
-  deleteBtn: { backgroundColor: '#0055ff' }, // app's primary blue
+  deleteBtn: { backgroundColor: '#0055ff' },
   btnText: { color: '#fff', fontWeight: '600' },
 
-  // Modal
   modalOverlay: {
     flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)',
   },
@@ -266,32 +287,25 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 5,
   },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 14, textAlign: 'center' },
-  label: { fontWeight: '600', marginTop: 10, marginBottom: 4 },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
+  label: { fontWeight: '600', marginBottom: 4, color: '#333' },
   modalInput: {
     backgroundColor: '#f4f4f4',
     borderRadius: 8,
     padding: 10,
+    fontSize: 14,
   },
+  error: { color: 'red', fontSize: 13, marginTop: 4 },
   modalActions: {
-    flexDirection: 'row',
-    marginTop: 16,
-    justifyContent: 'space-between',
+    flexDirection: 'row', marginTop: 20, justifyContent: 'space-between'
   },
   saveBtn: {
-    backgroundColor: '#0055ff',
-    paddingVertical: 12,
-    flex: 1,
-    marginRight: 6,
-    borderRadius: 8,
-    alignItems: 'center',
+    backgroundColor: '#0055ff', flex: 1, marginRight: 6,
+    paddingVertical: 12, borderRadius: 8, alignItems: 'center'
   },
   cancelBtn: {
-    backgroundColor: '#999',
-    paddingVertical: 12,
-    flex: 1,
-    marginLeft: 6,
-    borderRadius: 8,
-    alignItems: 'center',
+    backgroundColor: '#999', flex: 1, marginLeft: 6,
+    paddingVertical: 12, borderRadius: 8, alignItems: 'center'
   },
+  fieldWrap: { marginBottom: 14 },
 });

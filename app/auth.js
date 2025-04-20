@@ -1,21 +1,15 @@
 import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Alert,
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  KeyboardAvoidingView, Platform, ScrollView, Alert
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
+  signInWithEmailAndPassword
 } from 'firebase/auth';
-import { auth } from '../firebaseConfig';
+import { auth, db } from '../firebaseConfig';
+import { setDoc, doc } from 'firebase/firestore';
 
 export default function AuthScreen() {
   const [formType, setFormType] = useState('signup');
@@ -23,9 +17,8 @@ export default function AuthScreen() {
     fullName: '',
     email: '',
     password: '',
-    confirmPassword: '',
+    confirmPassword: ''
   });
-
   const [errors, setErrors] = useState({});
   const [passwordFocused, setPasswordFocused] = useState(false);
   const router = useRouter();
@@ -63,11 +56,9 @@ export default function AuthScreen() {
       if (
         code === 'auth/user-not-found' ||
         code === 'auth/wrong-password' ||
-        code === 'auth/invalid-login-credentials' || // ✅ fixed!
-        code === 'auth/invalid-credential' // handles some web errors
-      ) {
-        return 'Invalid email or password.';
-      }
+        code === 'auth/invalid-login-credentials' ||
+        code === 'auth/invalid-credential'
+      ) return 'Invalid email or password.';
       if (code === 'auth/invalid-email') return 'Invalid email format.';
       if (code === 'auth/network-request-failed') return 'Check your internet connection.';
       return 'An unexpected error occurred. Please try again.';
@@ -79,41 +70,41 @@ export default function AuthScreen() {
       return 'An unexpected error occurred. Please try again.';
     }
   };
-  
 
   const handleSubmit = async () => {
-    if (validateForm()) {
+    if (!validateForm()) return;
+
+    try {
       if (formType === 'signup') {
-        try {
-          const result = await createUserWithEmailAndPassword(
-            auth,
-            formData.email,
-            formData.password
-          );
-          console.log('✅ Sign-up success:', result.user?.email);
-          Alert.alert('🎉 Success', 'Account created successfully!');
-          router.replace('/');
-        } catch (err) {
-          console.error('❌ Sign-up error:', err.code, err.message);
-          const message = getFirebaseErrorMessage(err.code, 'signup');
-          setErrors({ general: message });
-        }
+        const result = await createUserWithEmailAndPassword(
+          auth,
+          formData.email,
+          formData.password
+        );
+
+        // ✅ Save fullName to Firestore
+        await setDoc(doc(db, 'users', result.user.uid), {
+          fullName: formData.fullName,
+          email: formData.email,
+          createdAt: new Date()
+        });
+
+        Alert.alert('🎉 Success', 'Account created successfully!');
+        router.replace('/');
       } else {
-        try {
-          const result = await signInWithEmailAndPassword(
-            auth,
-            formData.email,
-            formData.password
-          );
-          console.log('✅ Sign-in success:', result.user?.email);
-          Alert.alert('✅ Welcome', 'Signed in successfully!');
-          router.replace('/');
-        } catch (err) {
-          console.error('❌ Sign-in error:', err.code, err.message);
-          const message = getFirebaseErrorMessage(err.code, 'signin');
-          setErrors({ general: message });
-        }
+        const result = await signInWithEmailAndPassword(
+          auth,
+          formData.email,
+          formData.password
+        );
+
+        Alert.alert('✅ Welcome', 'Signed in successfully!');
+        router.replace('/');
       }
+    } catch (err) {
+      console.error('❌ Auth error:', err.code, err.message);
+      const message = getFirebaseErrorMessage(err.code, formType);
+      setErrors({ general: message });
     }
   };
 
@@ -128,7 +119,7 @@ export default function AuthScreen() {
             {formType === 'signup' ? 'Create Account' : 'Sign In'}
           </Text>
 
-          {errors.general ? <Text style={styles.errorText}>{errors.general}</Text> : null}
+          {errors.general && <Text style={styles.errorText}>{errors.general}</Text>}
 
           {formType === 'signup' && (
             <>

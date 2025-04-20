@@ -8,11 +8,11 @@ import * as FileSystem from 'expo-file-system';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import ModalDropdown from 'react-native-modal-dropdown';
 import { db } from '../../firebaseConfig';
-import { addDoc, collection, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, Timestamp, getDocs } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
-import { useRouter } from 'expo-router'; // ✅ redirect support
+import { useRouter } from 'expo-router';
 
-const imgbbApiKey = '642ff87b12fdccc4709d73200f05dba6'; // ← Replace with your real key
+const imgbbApiKey = '642ff87b12fdccc4709d73200f05dba6'; // Replace with your own key
 
 export default function CreateEventForm() {
   const router = useRouter();
@@ -125,12 +125,23 @@ export default function CreateEventForm() {
         imageUrl = await uploadToImgbb(image);
       }
 
+      // 🔍 Fetch fullName from users collection using email
+      const usersSnap = await getDocs(collection(db, 'users'));
+      let fullName = 'Anonymous';
+      usersSnap.forEach(doc => {
+        const data = doc.data();
+        if (data.email === user.email) {
+          fullName = data.fullName;
+        }
+      });
+
       const newEvent = {
         ...formData,
         maxAttendees: formData.maxAttendees ? parseInt(formData.maxAttendees) : 50,
         date: Timestamp.fromDate(date),
         time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
         createdBy: user.uid,
+        createdByName: fullName, // ✅ Add full name
         createdAt: Timestamp.now(),
         imageUrl,
       };
@@ -139,8 +150,7 @@ export default function CreateEventForm() {
       Alert.alert('✅ Success', 'Event created successfully!');
       setFormData({ eventName: '', description: '', location: '', category: '', maxAttendees: '' });
       setImage(null);
-
-      router.replace('/'); // ✅ Redirect to Explore
+      router.replace('/');
     } catch (error) {
       console.error('Error uploading event:', error);
       Alert.alert('❌ Error', 'Something went wrong. Please try again.');
@@ -258,104 +268,31 @@ export default function CreateEventForm() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-  },
-  scroll: {
-    padding: 16,
-    paddingBottom: 100,
-  },
+  container: { flex: 1, backgroundColor: '#fff' },
+  scroll: { padding: 16, paddingBottom: 100 },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    marginVertical: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 5,
+    backgroundColor: '#fff', borderRadius: 16, padding: 20, shadowColor: '#000',
+    shadowOpacity: 0.08, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 5,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 16,
-    textAlign: 'center',
-    color: '#222',
-  },
-  label: {
-    fontWeight: '600',
-    marginTop: 14,
-    marginBottom: 6,
-    color: '#333',
-  },
+  title: { fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 16, color: '#222' },
+  label: { fontWeight: '600', marginTop: 14, marginBottom: 6, color: '#333' },
   input: {
-    backgroundColor: '#f2f2f2',
-    padding: 12,
-    borderRadius: 10,
-    fontSize: 15,
+    backgroundColor: '#f2f2f2', padding: 12, borderRadius: 10, fontSize: 15,
   },
-  helper: {
-    fontSize: 12,
-    color: '#777',
-    marginTop: 4,
-    marginLeft: 4,
-  },
-  dropdown: {
-    backgroundColor: '#f2f2f2',
-    padding: 12,
-    borderRadius: 10,
-    justifyContent: 'center',
-  },
-  dropdownList: {
-    width: '85%',
-    height: 'auto',
-    borderRadius: 8,
-  },
-  dropdownText: {
-    fontSize: 15,
-    color: '#333',
-  },
-  dropdownItemText: {
-    padding: 12,
-    fontSize: 14,
-  },
-  error: {
-    color: '#cc0000',
-    marginTop: 4,
-    fontSize: 13,
-    marginLeft: 4,
-  },
+  dropdown: { backgroundColor: '#f2f2f2', padding: 12, borderRadius: 10 },
+  dropdownList: { width: '85%', borderRadius: 8 },
+  dropdownText: { fontSize: 15, color: '#333' },
+  dropdownItemText: { padding: 12, fontSize: 14 },
+  error: { color: '#cc0000', marginTop: 4, fontSize: 13, marginLeft: 4 },
+  helper: { fontSize: 12, color: '#777', marginTop: 4, marginLeft: 4 },
   uploadBtn: {
-    marginTop: 10,
-    backgroundColor: '#eee',
-    padding: 12,
-    borderRadius: 10,
-    alignItems: 'center',
+    marginTop: 10, backgroundColor: '#eee', padding: 12, borderRadius: 10, alignItems: 'center',
   },
-  uploadText: {
-    fontWeight: '600',
-    color: '#333',
-    fontSize: 15,
-  },
-  imageName: {
-    marginTop: 8,
-    fontSize: 13,
-    fontStyle: 'italic',
-    color: '#555',
-  },
+  uploadText: { fontWeight: '600', color: '#333', fontSize: 15 },
+  imageName: { marginTop: 8, fontSize: 13, fontStyle: 'italic', color: '#555' },
   button: {
-    marginTop: 24,
-    backgroundColor: '#0055ff',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
+    marginTop: 24, backgroundColor: '#0055ff', paddingVertical: 14,
+    borderRadius: 10, alignItems: 'center',
   },
-  buttonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
+  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
 });
-
