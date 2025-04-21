@@ -28,6 +28,7 @@ export default function ExplorePage() {
   useEffect(() => {
     const fetchEvents = async () => {
       try {
+        setLoading(true);
         const snapshot = await getDocs(collection(db, 'events'));
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -36,9 +37,7 @@ export default function ExplorePage() {
         const fetched = await Promise.all(
           snapshot.docs.map(async docSnap => {
             const data = { id: docSnap.id, ...docSnap.data() };
-            const eventDate = data.date?.seconds
-              ? new Date(data.date.seconds * 1000)
-              : null;
+            const eventDate = data.date?.seconds ? new Date(data.date.seconds * 1000) : null;
             if (!eventDate || eventDate < today) return null;
 
             let registeredCount = 0;
@@ -47,14 +46,23 @@ export default function ExplorePage() {
             if (regSnap.exists()) {
               const regData = regSnap.data();
               registeredCount = Object.keys(regData).length;
-              if (user?.email && regData[user.email]) isRegistered = true;
+              if (user?.uid) {
+                isRegistered = !!regData[user.uid];
+              }
             }
 
             return { ...data, registeredCount, isRegistered };
           })
         );
 
-        const cleanEvents = fetched.filter(Boolean);
+        const cleanEvents = fetched
+          .filter(Boolean)
+          .sort((a, b) => {
+            const aTime = a.createdAt?.seconds || 0;
+            const bTime = b.createdAt?.seconds || 0;
+            return aTime - bTime;
+          });
+
         const regMap = {};
         cleanEvents.forEach(ev => regMap[ev.id] = ev.isRegistered);
         setRegisteredEvents(regMap);
@@ -78,12 +86,37 @@ export default function ExplorePage() {
     setProcessingId(event.id);
 
     try {
+      const allRegsSnapshot = await getDocs(collection(db, 'registrations'));
+
+      for (const docSnap of allRegsSnapshot.docs) {
+        const regData = docSnap.data();
+        if (regData[currentUser.uid]) {
+          const eventRef = doc(db, 'events', docSnap.id);
+          const conflictingEventSnap = await getDoc(eventRef);
+          const conflictingEvent = conflictingEventSnap.data();
+
+          const isSameTime =
+            event.date?.seconds === conflictingEvent?.date?.seconds &&
+            event.time === conflictingEvent?.time;
+
+          if (isSameTime) {
+            ToastAndroid.show(
+              'You are already registered for another event at the same time!',
+              ToastAndroid.LONG
+            );
+            setProcessingId(null);
+            return;
+          }
+        }
+      }
+
       const ref = doc(db, 'registrations', event.id);
       const snap = await getDoc(ref);
+
       if (snap.exists()) {
-        await updateDoc(ref, { [currentUser.email]: true });
+        await updateDoc(ref, { [currentUser.uid]: true });
       } else {
-        await setDoc(ref, { [currentUser.email]: true });
+        await setDoc(ref, { [currentUser.uid]: true });
       }
 
       setRegisteredEvents(prev => ({ ...prev, [event.id]: true }));
@@ -119,8 +152,9 @@ export default function ExplorePage() {
   const confirmLeave = async (event) => {
     try {
       await updateDoc(doc(db, 'registrations', event.id), {
-        [currentUser.email]: deleteField(),
+        [currentUser.uid]: deleteField(),
       });
+
       setRegisteredEvents(prev => ({ ...prev, [event.id]: false }));
       setEvents(prev =>
         prev.map(e =>

@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, FlatList, StyleSheet, Image,
-  TouchableOpacity, ActivityIndicator, Modal, TextInput,
-  KeyboardAvoidingView, Platform, ScrollView, Alert
+  View, Text, FlatList, StyleSheet, Image, TouchableOpacity,
+  ActivityIndicator, Modal, TextInput, KeyboardAvoidingView,
+  Platform, ScrollView, Alert, ToastAndroid,
 } from 'react-native';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import {
-  collection, query, where, getDocs, orderBy, doc, deleteDoc, updateDoc
+  collection, query, where, getDocs, orderBy, doc,
+  deleteDoc, updateDoc,
 } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 
@@ -23,32 +24,33 @@ export default function MyEventsTab() {
     const auth = getAuth();
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser || null);
-      if (!firebaseUser) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const q = query(
-          collection(db, 'events'),
-          where('createdBy', '==', firebaseUser.uid),
-          orderBy('createdAt', 'desc')
-        );
-        const snapshot = await getDocs(q);
-        const userEvents = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-        setEvents(userEvents);
-      } catch (err) {
-        console.error('Error fetching user events:', err);
-      } finally {
-        setLoading(false);
-      }
+      if (firebaseUser) await fetchEvents(firebaseUser.uid);
+      else setLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
+
+  const fetchEvents = async (uid) => {
+    try {
+      setLoading(true);
+      const q = query(
+        collection(db, 'events'),
+        where('createdBy', '==', uid),
+        orderBy('createdAt', 'desc')
+      );
+      const snapshot = await getDocs(q);
+      const userEvents = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setEvents(userEvents);
+    } catch (err) {
+      console.error('Error fetching user events:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const validateEditForm = () => {
     const errors = {};
@@ -83,11 +85,9 @@ export default function MyEventsTab() {
         maxAttendees: parseInt(editEvent.maxAttendees),
       });
 
-      const updatedEvents = events.map(e =>
-        e.id === editEvent.id ? { ...editEvent } : e
-      );
-      setEvents(updatedEvents);
       setEditEvent(null);
+      ToastAndroid.show('Event updated successfully!', ToastAndroid.SHORT);
+      if (user?.uid) await fetchEvents(user.uid);
     } catch (err) {
       Alert.alert('Error', 'Failed to update event.');
     } finally {
@@ -99,11 +99,14 @@ export default function MyEventsTab() {
     Alert.alert('Confirm Delete', 'Are you sure you want to delete this event?', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Delete', style: 'destructive', onPress: async () => {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
           try {
             setDeleteLoadingId(eventId);
             await deleteDoc(doc(db, 'events', eventId));
-            setEvents(events.filter(e => e.id !== eventId));
+            ToastAndroid.show('Event deleted successfully!', ToastAndroid.SHORT);
+            if (user?.uid) await fetchEvents(user.uid);
           } catch (err) {
             Alert.alert('Error', 'Failed to delete event.');
           } finally {
@@ -129,9 +132,11 @@ export default function MyEventsTab() {
     return (
       <View style={styles.card}>
         <Image
-          source={item.imageUrl === 'default' || !item.imageUrl
-            ? require('../../assets/images/default-event.png')
-            : { uri: item.imageUrl }}
+          source={
+            item.imageUrl === 'default' || !item.imageUrl
+              ? require('../../assets/images/default-event.png')
+              : { uri: item.imageUrl }
+          }
           style={styles.image}
         />
         <Text style={styles.title}>{item.eventName}</Text>
@@ -214,7 +219,10 @@ export default function MyEventsTab() {
                   onChangeText={text =>
                     setEditEvent(prev => ({ ...prev, maxAttendees: text }))
                   }
-                  style={[styles.modalInput, editEvent?.originalMaxAttendees >= 50 && { backgroundColor: '#eee' }]}
+                  style={[
+                    styles.modalInput,
+                    editEvent?.originalMaxAttendees >= 50 && { backgroundColor: '#eee' },
+                  ]}
                 />
                 {editErrors.maxAttendees && (
                   <Text style={styles.error}>{editErrors.maxAttendees}</Text>
@@ -259,17 +267,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
-  image: {
-    width: '100%', height: 160, borderRadius: 10, marginBottom: 10, backgroundColor: '#e0e0e0'
-  },
+  image: { width: '100%', height: 160, borderRadius: 10, marginBottom: 10, backgroundColor: '#e0e0e0' },
   title: { fontSize: 18, fontWeight: '600', marginBottom: 4, color: '#333' },
   meta: { fontSize: 14, color: '#666', marginBottom: 2 },
   noEvents: { textAlign: 'center', marginTop: 60, fontSize: 16, color: '#999' },
 
   actions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-  actionBtn: {
-    flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 4
-  },
+  actionBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 4 },
   editBtn: { backgroundColor: '#888' },
   deleteBtn: { backgroundColor: '#0055ff' },
   btnText: { color: '#fff', fontWeight: '600' },
@@ -278,34 +282,15 @@ const styles = StyleSheet.create({
     flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)',
   },
   modalContent: {
-    width: '90%',
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
+    width: '90%', backgroundColor: '#fff', padding: 20, borderRadius: 16,
+    shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5,
   },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
   label: { fontWeight: '600', marginBottom: 4, color: '#333' },
-  modalInput: {
-    backgroundColor: '#f4f4f4',
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 14,
-  },
+  modalInput: { backgroundColor: '#f4f4f4', borderRadius: 8, padding: 10, fontSize: 14 },
   error: { color: 'red', fontSize: 13, marginTop: 4 },
-  modalActions: {
-    flexDirection: 'row', marginTop: 20, justifyContent: 'space-between'
-  },
-  saveBtn: {
-    backgroundColor: '#0055ff', flex: 1, marginRight: 6,
-    paddingVertical: 12, borderRadius: 8, alignItems: 'center'
-  },
-  cancelBtn: {
-    backgroundColor: '#999', flex: 1, marginLeft: 6,
-    paddingVertical: 12, borderRadius: 8, alignItems: 'center'
-  },
+  modalActions: { flexDirection: 'row', marginTop: 20, justifyContent: 'space-between' },
+  saveBtn: { backgroundColor: '#0055ff', flex: 1, marginRight: 6, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  cancelBtn: { backgroundColor: '#999', flex: 1, marginLeft: 6, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   fieldWrap: { marginBottom: 14 },
 });

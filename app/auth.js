@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, Alert
+  KeyboardAvoidingView, Platform, ScrollView, Alert, LogBox 
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
@@ -10,6 +10,13 @@ import {
 } from 'firebase/auth';
 import { auth, db } from '../firebaseConfig';
 import { setDoc, doc } from 'firebase/firestore';
+
+
+LogBox.ignoreLogs([
+  'auth/invalid-credential',
+  'auth/invalid-login-credentials',
+  'Possible Unhandled Promise Rejection',
+]);
 
 export default function AuthScreen() {
   const [formType, setFormType] = useState('signup');
@@ -52,23 +59,26 @@ export default function AuthScreen() {
   };
 
   const getFirebaseErrorMessage = (code, type) => {
-    if (type === 'signin') {
-      if (
-        code === 'auth/user-not-found' ||
-        code === 'auth/wrong-password' ||
-        code === 'auth/invalid-login-credentials' ||
-        code === 'auth/invalid-credential'
-      ) return 'Invalid email or password.';
-      if (code === 'auth/invalid-email') return 'Invalid email format.';
-      if (code === 'auth/network-request-failed') return 'Check your internet connection.';
-      return 'An unexpected error occurred. Please try again.';
-    } else {
-      if (code === 'auth/email-already-in-use') return 'This email is already registered.';
-      if (code === 'auth/invalid-email') return 'Invalid email format.';
-      if (code === 'auth/weak-password') return 'Password must be at least 6 characters.';
-      if (code === 'auth/network-request-failed') return 'Check your internet connection.';
-      return 'An unexpected error occurred. Please try again.';
-    }
+    const signinMessages = {
+      'auth/user-not-found': 'Invalid email or password.',
+      'auth/wrong-password': 'Invalid email or password.',
+      'auth/invalid-login-credentials': 'Invalid email or password.',
+      'auth/invalid-credential': 'Invalid email or password.',
+      'auth/invalid-email': 'Invalid email format.',
+      'auth/network-request-failed': 'Please check your internet connection.',
+    };
+
+    const signupMessages = {
+      'auth/email-already-in-use': 'This email is already registered.',
+      'auth/invalid-email': 'Invalid email format.',
+      'auth/weak-password': 'Password must be at least 6 characters.',
+      'auth/network-request-failed': 'Please check your internet connection.',
+    };
+
+    const fallback = 'An unexpected error occurred. Please try again.';
+    return type === 'signin'
+      ? signinMessages[code] || fallback
+      : signupMessages[code] || fallback;
   };
 
   const handleSubmit = async () => {
@@ -76,13 +86,8 @@ export default function AuthScreen() {
 
     try {
       if (formType === 'signup') {
-        const result = await createUserWithEmailAndPassword(
-          auth,
-          formData.email,
-          formData.password
-        );
+        const result = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
 
-        // ✅ Save fullName to Firestore
         await setDoc(doc(db, 'users', result.user.uid), {
           fullName: formData.fullName,
           email: formData.email,
@@ -92,17 +97,11 @@ export default function AuthScreen() {
         Alert.alert('🎉 Success', 'Account created successfully!');
         router.replace('/');
       } else {
-        const result = await signInWithEmailAndPassword(
-          auth,
-          formData.email,
-          formData.password
-        );
-
+        await signInWithEmailAndPassword(auth, formData.email, formData.password);
         Alert.alert('✅ Welcome', 'Signed in successfully!');
         router.replace('/');
       }
     } catch (err) {
-      console.error('❌ Auth error:', err.code, err.message);
       const message = getFirebaseErrorMessage(err.code, formType);
       setErrors({ general: message });
     }

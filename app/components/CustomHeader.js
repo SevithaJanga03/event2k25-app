@@ -48,7 +48,7 @@ export default function CustomHeader() {
 
 const styles = StyleSheet.create({
   header: {
-    paddingTop: 50,
+    paddingTop: 30,
     paddingBottom: 10,
     paddingHorizontal: 20,
     flexDirection: 'row',

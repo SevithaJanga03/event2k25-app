@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Alert,
-  ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator
+  ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, LogBox
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
@@ -12,10 +12,17 @@ import { addDoc, collection, Timestamp, getDocs } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { useRouter } from 'expo-router';
 
-const imgbbApiKey = '642ff87b12fdccc4709d73200f05dba6'; // Replace with your own key
+const imgbbApiKey = '642ff87b12fdccc4709d73200f05dba6';
+
+
+// Suppress key spread warning
+LogBox.ignoreLogs([
+  'A props object containing a "key" prop is being spread into JSX'
+]);
 
 export default function CreateEventForm() {
   const router = useRouter();
+  const scrollViewRef = useRef();
 
   const [formData, setFormData] = useState({
     eventName: '',
@@ -31,6 +38,7 @@ export default function CreateEventForm() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
 
   const categories = [
     'Concert / Music', 'Conference', 'Workshop', 'Tech Meetup',
@@ -43,24 +51,35 @@ export default function CreateEventForm() {
     setErrors({ ...errors, [field]: '' });
   };
 
+  const scrollToFirstError = () => {
+    const keys = ['eventName', 'description', 'location', 'category', 'date', 'time', 'maxAttendees'];
+    const errorKey = keys.find(key => errors[key]);
+    const index = keys.indexOf(errorKey);
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({ y: index * 110, animated: true });
+    }
+  };
+
   const validate = () => {
     const newErrors = {};
+    const now = new Date();
 
     if (!formData.eventName.trim()) newErrors.eventName = 'Event name is required.';
     if (!formData.description.trim()) newErrors.description = 'Description is required.';
     if (!formData.location.trim()) newErrors.location = 'Location is required.';
     if (!formData.category) newErrors.category = 'Category is required.';
+    if (date <= now) {
+      newErrors.time = 'Pick a time at least 1 hour from now.';
+    }
 
     if (formData.maxAttendees) {
       const num = parseInt(formData.maxAttendees);
-      if (isNaN(num)) {
-        newErrors.maxAttendees = 'Must be a number.';
-      } else if (num < 1 || num > 50) {
-        newErrors.maxAttendees = 'Must be between 1 and 50.';
-      }
+      if (isNaN(num)) newErrors.maxAttendees = 'Must be a number.';
+      else if (num < 1 || num > 50) newErrors.maxAttendees = 'Must be between 1 and 50.';
     }
 
     setErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) scrollToFirstError();
     return Object.keys(newErrors).length === 0;
   };
 
@@ -125,14 +144,26 @@ export default function CreateEventForm() {
         imageUrl = await uploadToImgbb(image);
       }
 
-      // 🔍 Fetch fullName from users collection using email
+      const selectedTimestamp = date.getTime();
+      const eventSnap = await getDocs(collection(db, 'events'));
+      const hasConflict = eventSnap.docs.some(doc => {
+        const data = doc.data();
+        return data.createdBy === user.uid &&
+          data.date?.seconds &&
+          new Date(data.date.seconds * 1000).getTime() === selectedTimestamp;
+      });
+
+      if (hasConflict) {
+        Alert.alert('⛔ Conflict', 'You already have an event at this time.');
+        setUploading(false);
+        return;
+      }
+
       const usersSnap = await getDocs(collection(db, 'users'));
       let fullName = 'Anonymous';
       usersSnap.forEach(doc => {
         const data = doc.data();
-        if (data.email === user.email) {
-          fullName = data.fullName;
-        }
+        if (data.email === user.email) fullName = data.fullName;
       });
 
       const newEvent = {
@@ -141,7 +172,7 @@ export default function CreateEventForm() {
         date: Timestamp.fromDate(date),
         time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
         createdBy: user.uid,
-        createdByName: fullName, // ✅ Add full name
+        createdByName: fullName,
         createdAt: Timestamp.now(),
         imageUrl,
       };
@@ -161,13 +192,13 @@ export default function CreateEventForm() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollViewRef} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
           <Text style={styles.title}>Create Event</Text>
 
           <Text style={styles.label}>Event Name *</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, errors.eventName && styles.errorInput]}
             placeholder="Enter event name"
             value={formData.eventName}
             onChangeText={(text) => handleChange('eventName', text)}
@@ -176,7 +207,7 @@ export default function CreateEventForm() {
 
           <Text style={styles.label}>Description *</Text>
           <TextInput
-            style={[styles.input, { height: 80 }]}
+            style={[styles.input, { height: 80 }, errors.description && styles.errorInput]}
             multiline
             placeholder="Enter description"
             value={formData.description}
@@ -185,38 +216,50 @@ export default function CreateEventForm() {
           {errors.description && <Text style={styles.error}>{errors.description}</Text>}
 
           <Text style={styles.label}>Date *</Text>
-          <TouchableOpacity onPress={() => setShowDatePicker(true)} style={styles.input}>
+          <TouchableOpacity
+            onPress={() => setShowDatePicker(true)}
+            style={[styles.input, errors.date && styles.errorInput]}
+          >
             <Text>{date.toDateString()}</Text>
           </TouchableOpacity>
+          {errors.date && <Text style={styles.error}>{errors.date}</Text>}
           {showDatePicker && (
             <DateTimePicker
               mode="date"
               value={date}
+              minimumDate={new Date()}
               onChange={(e, selectedDate) => {
                 setShowDatePicker(false);
-                if (selectedDate) setDate(selectedDate);
+                if (selectedDate) {
+                  setDate(prev => new Date(selectedDate.setHours(prev.getHours(), prev.getMinutes())));
+                  setErrors({ ...errors, date: '', time: '' });
+                }
               }}
             />
           )}
 
           <Text style={styles.label}>Time *</Text>
-          <TouchableOpacity onPress={() => setShowTimePicker(true)} style={styles.input}>
+          <TouchableOpacity onPress={() => setShowTimePicker(true)} style={[styles.input, errors.time && styles.errorInput]}>
             <Text>{date.toLocaleTimeString()}</Text>
           </TouchableOpacity>
+          {errors.time && <Text style={styles.error}>{errors.time}</Text>}
           {showTimePicker && (
             <DateTimePicker
               mode="time"
               value={date}
               onChange={(e, selectedTime) => {
                 setShowTimePicker(false);
-                if (selectedTime) setDate(selectedTime);
+                if (selectedTime) {
+                  setDate(prev => new Date(prev.setHours(selectedTime.getHours(), selectedTime.getMinutes())));
+                  setErrors({ ...errors, date: '', time: '' });
+                }
               }}
             />
           )}
 
           <Text style={styles.label}>Location *</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, errors.location && styles.errorInput]}
             placeholder="Enter location"
             value={formData.location}
             onChangeText={(text) => handleChange('location', text)}
@@ -224,20 +267,29 @@ export default function CreateEventForm() {
           {errors.location && <Text style={styles.error}>{errors.location}</Text>}
 
           <Text style={styles.label}>Event Type *</Text>
+          <View style={{ marginBottom: 6 }}>
           <ModalDropdown
             options={categories}
             defaultValue="Select a category"
-            style={styles.dropdown}
+            style={[styles.dropdown, errors.category && styles.errorInput]}
             dropdownStyle={styles.dropdownList}
             textStyle={styles.dropdownText}
             dropdownTextStyle={styles.dropdownItemText}
             onSelect={(index, value) => handleChange('category', value)}
+            adjustFrame={style => ({
+              ...style,
+              left: 50, // match horizontal padding of ScrollView
+              width: '70%', // match input width
+              top: style.top + 8, // slight spacing below input
+            })}
           />
+          </View>
+
           {errors.category && <Text style={styles.error}>{errors.category}</Text>}
 
           <Text style={styles.label}>Max Attendees (optional)</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, errors.maxAttendees && styles.errorInput]}
             placeholder="e.g. 50"
             keyboardType="numeric"
             value={formData.maxAttendees}
@@ -251,9 +303,7 @@ export default function CreateEventForm() {
             <Text style={styles.uploadText}>Pick an Image</Text>
           </TouchableOpacity>
           {image && (
-            <Text style={styles.imageName}>
-              Selected: {image.split('/').pop()}
-            </Text>
+            <Text style={styles.imageName}>Selected: {image.split('/').pop()}</Text>
           )}
 
           <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={uploading}>
@@ -279,10 +329,36 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: '#f2f2f2', padding: 12, borderRadius: 10, fontSize: 15,
   },
-  dropdown: { backgroundColor: '#f2f2f2', padding: 12, borderRadius: 10 },
-  dropdownList: { width: '85%', borderRadius: 8 },
-  dropdownText: { fontSize: 15, color: '#333' },
-  dropdownItemText: { padding: 12, fontSize: 14 },
+  errorInput: {
+    borderColor: '#cc0000', borderWidth: 1,
+  },
+  dropdown: {
+    backgroundColor: '#f2f2f2',
+    padding: 12,
+    borderRadius: 10,
+    width: '100%',
+  },
+  
+  dropdownList: {
+    // These values will be overridden by adjustFrame, but it's good to define them
+    maxHeight: 220,
+    borderRadius: 10,
+    elevation: 5,
+    backgroundColor: '#fff',
+  },
+  
+  dropdownText: {
+    fontSize: 15,
+    color: '#333',
+  },
+  
+  dropdownItemText: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    fontSize: 14,
+    color: '#444',
+  },
+  
   error: { color: '#cc0000', marginTop: 4, fontSize: 13, marginLeft: 4 },
   helper: { fontSize: 12, color: '#777', marginTop: 4, marginLeft: 4 },
   uploadBtn: {

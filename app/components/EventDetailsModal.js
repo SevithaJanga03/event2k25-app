@@ -12,7 +12,6 @@ import {
 export default function EventDetailsModal({ visible, event, onClose }) {
   const [fadeAnim] = useState(new Animated.Value(0));
   const [registeredCount, setRegisteredCount] = useState(0);
-  const [attendees, setAttendees] = useState([]);
   const [hostName, setHostName] = useState('');
 
   useEffect(() => {
@@ -24,30 +23,12 @@ export default function EventDetailsModal({ visible, event, onClose }) {
         const userDoc = await getDoc(doc(db, 'users', event.createdBy));
         setHostName(userDoc.exists() ? userDoc.data().fullName : 'Anonymous');
 
-        // Fetch registration count and attendee emails
+        // Fetch registration count 
         const regSnap = await getDoc(doc(db, 'registrations', event.id));
         const regData = regSnap.exists() ? regSnap.data() : {};
-        const emails = Object.keys(regData || {});
-        setRegisteredCount(emails.length);
+        const uids = Object.keys(regData || {});
+        setRegisteredCount(uids.length);
 
-        // If viewer is host, fetch full user info
-        const currentUser = auth.currentUser;
-        if (currentUser?.uid === event.createdBy && emails.length > 0) {
-          const userSnapshot = await getDocs(collection(db, 'users'));
-          const emailToName = {};
-          userSnapshot.forEach(doc => {
-            const { email, fullName } = doc.data();
-            emailToName[email] = fullName;
-          });
-
-          const detailed = emails.map(email => ({
-            email,
-            fullName: emailToName[email] || 'Unknown'
-          }));
-          setAttendees(detailed);
-        } else {
-          setAttendees([]); // Not host
-        }
 
       } catch (err) {
         console.error('Error loading event details:', err);
@@ -95,14 +76,7 @@ export default function EventDetailsModal({ visible, event, onClose }) {
             </Text>
             <Text style={styles.meta}>👤 Host: {hostName}</Text>
 
-            {attendees.length > 0 && (
-              <View style={{ marginTop: 14 }}>
-                <Text style={styles.attendeeTitle}>Attendees:</Text>
-                {attendees.map((a, index) => (
-                  <Text key={index} style={styles.attendeeText}>• {a.fullName} ({a.email})</Text>
-                ))}
-              </View>
-            )}
+            
           </ScrollView>
 
           <TouchableOpacity onPress={handleShare} style={styles.shareBtn}>
