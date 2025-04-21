@@ -1,14 +1,7 @@
 import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Alert,
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  KeyboardAvoidingView, Platform, ScrollView, Alert, LogBox 
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
@@ -19,15 +12,21 @@ import {
 import { auth, db } from '../firebaseConfig';
 import { setDoc, doc } from 'firebase/firestore';
 
+
+LogBox.ignoreLogs([
+  'auth/invalid-credential',
+  'auth/invalid-login-credentials',
+  'Possible Unhandled Promise Rejection',
+]);
+
 export default function AuthScreen() {
   const [formType, setFormType] = useState('signup');
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
     password: '',
-    confirmPassword: '',
+    confirmPassword: ''
   });
-
   const [errors, setErrors] = useState({});
   const [passwordFocused, setPasswordFocused] = useState(false);
   const router = useRouter();
@@ -78,11 +77,34 @@ export default function AuthScreen() {
       if (code === 'auth/network-request-failed') return 'Check your internet connection.';
       return 'An unexpected error occurred. Please try again.';
     }
+    const signinMessages = {
+      'auth/user-not-found': 'Invalid email or password.',
+      'auth/wrong-password': 'Invalid email or password.',
+      'auth/invalid-login-credentials': 'Invalid email or password.',
+      'auth/invalid-credential': 'Invalid email or password.',
+      'auth/invalid-email': 'Invalid email format.',
+      'auth/network-request-failed': 'Please check your internet connection.',
+    };
+
+    const signupMessages = {
+      'auth/email-already-in-use': 'This email is already registered.',
+      'auth/invalid-email': 'Invalid email format.',
+      'auth/weak-password': 'Password must be at least 6 characters.',
+      'auth/network-request-failed': 'Please check your internet connection.',
+    };
+
+    const fallback = 'An unexpected error occurred. Please try again.';
+    return type === 'signin'
+      ? signinMessages[code] || fallback
+      : signupMessages[code] || fallback;
   };
 
   const handleSubmit = async () => {
-    if (validateForm()) {
+    if (!validateForm()) return;
+
+    try {
       if (formType === 'signup') {
+
         try {
           const result = await createUserWithEmailAndPassword(
             auth,
@@ -103,22 +125,25 @@ export default function AuthScreen() {
           const message = getFirebaseErrorMessage(err.code, 'signup');
           setErrors({ general: message });
         }
+        const result = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+
+        await setDoc(doc(db, 'users', result.user.uid), {
+          fullName: formData.fullName,
+          email: formData.email,
+          createdAt: new Date()
+        });
+
+        Alert.alert('🎉 Success', 'Account created successfully!');
+        router.replace('/');
+
       } else {
-        try {
-          const result = await signInWithEmailAndPassword(
-            auth,
-            formData.email,
-            formData.password
-          );
-          console.log('✅ Sign-in success:', result.user?.email);
-          Alert.alert('✅ Welcome', 'Signed in successfully!');
-          router.replace('/');
-        } catch (err) {
-          console.error('❌ Sign-in error:', err.code, err.message);
-          const message = getFirebaseErrorMessage(err.code, 'signin');
-          setErrors({ general: message });
-        }
+        await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        Alert.alert('✅ Welcome', 'Signed in successfully!');
+        router.replace('/');
       }
+    } catch (err) {
+      const message = getFirebaseErrorMessage(err.code, formType);
+      setErrors({ general: message });
     }
   };
 
@@ -151,7 +176,7 @@ export default function AuthScreen() {
             {formType === 'signup' ? 'Create Account' : 'Sign In'}
           </Text>
 
-          {errors.general ? <Text style={styles.errorText}>{errors.general}</Text> : null}
+          {errors.general && <Text style={styles.errorText}>{errors.general}</Text>}
 
           {formType === 'signup' && (
             <>

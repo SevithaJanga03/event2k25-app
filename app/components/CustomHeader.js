@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Image, StyleSheet, ToastAndroid } from 'react-native';
 import { useRouter } from 'expo-router';
 import { auth } from '../../firebaseConfig';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -16,6 +16,22 @@ export default function CustomHeader() {
     router.push('/');
   };
 
+  const handleAuth = () => {
+    if (user) {
+      signOut(auth)
+        .then(() => {
+          ToastAndroid.show('You have been logged out.', ToastAndroid.SHORT);
+          router.replace('/'); // ✅ Redirect to Explore (or home)
+        })
+        .catch((err) => {
+          console.error('Logout error:', err);
+          ToastAndroid.show('Logout failed.', ToastAndroid.SHORT);
+        });
+    } else {
+      router.push('/auth');
+    }
+  };
+
   return (
     <View style={styles.header}>
       <TouchableOpacity onPress={goToHome} style={styles.logoWrap}>
@@ -23,7 +39,7 @@ export default function CustomHeader() {
         <Text style={styles.title}>Event2K25</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={() => (user ? signOut(auth) : router.push('/auth'))}>
+      <TouchableOpacity onPress={handleAuth}>
         <Text style={styles.auth}>{user ? 'Logout' : 'Login'}</Text>
       </TouchableOpacity>
     </View>
@@ -32,7 +48,7 @@ export default function CustomHeader() {
 
 const styles = StyleSheet.create({
   header: {
-    paddingTop: 50,
+    paddingTop: 30,
     paddingBottom: 10,
     paddingHorizontal: 20,
     flexDirection: 'row',

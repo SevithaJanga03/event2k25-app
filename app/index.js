@@ -1,14 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, Image,
-  ActivityIndicator, TouchableOpacity, ScrollView, Alert, ToastAndroid
+  ActivityIndicator, TouchableOpacity, ScrollView, Alert, ToastAndroid,
 } from 'react-native';
 import {
-  collection, getDocs, doc, updateDoc, setDoc, getDoc, deleteField
+  collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteField
 } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
 import EventDetailsModal from './components/EventDetailsModal';
-import { useRouter } from 'expo-router';
 
 export default function ExplorePage() {
   const [events, setEvents] = useState([]);
@@ -17,124 +16,155 @@ export default function ExplorePage() {
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
-  const [registeredEvents, setRegisteredEvents] = useState({});
-  const [registering, setRegistering] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
-  const router = useRouter();
+  const [registeredEvents, setRegisteredEvents] = useState({});
+  const [processingId, setProcessingId] = useState(null);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      setCurrentUser(user);
-      if (user) await fetchEvents(user);
-      else setLoading(false);
-    });
+    const unsubscribe = auth.onAuthStateChanged(setCurrentUser);
     return unsubscribe;
   }, []);
 
-  const fetchEvents = async (user) => {
-    try {
-      setLoading(true);
-      const snapshot = await getDocs(collection(db, 'events'));
-      const today = new Date(); today.setHours(0, 0, 0, 0);
+  useEffect(() => {
+    const fetchEvents = async () => {
+      try {
+        setLoading(true);
+        const snapshot = await getDocs(collection(db, 'events'));
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
 
-      const eventData = await Promise.all(snapshot.docs.map(async (docSnap) => {
-        const data = { id: docSnap.id, ...docSnap.data() };
-        const eventDate = data.date?.seconds ? new Date(data.date.seconds * 1000) : null;
-        if (!eventDate || eventDate < today) return null;
+        const user = auth.currentUser;
+        const fetched = await Promise.all(
+          snapshot.docs.map(async docSnap => {
+            const data = { id: docSnap.id, ...docSnap.data() };
+            const eventDate = data.date?.seconds ? new Date(data.date.seconds * 1000) : null;
+            if (!eventDate || eventDate < today) return null;
 
-        const regSnap = await getDoc(doc(db, 'registrations', docSnap.id));
-        const regMap = regSnap.exists() ? regSnap.data() : {};
-        const count = Object.keys(regMap).length;
-        const isRegistered = !!regMap[user.email];
+            let registeredCount = 0;
+            let isRegistered = false;
+            const regSnap = await getDoc(doc(db, 'registrations', docSnap.id));
+            if (regSnap.exists()) {
+              const regData = regSnap.data();
+              registeredCount = Object.keys(regData).length;
+              if (user?.uid) {
+                isRegistered = !!regData[user.uid];
+              }
+            }
 
-        return { ...data, registeredCount: count, isRegistered };
-      }));
+            return { ...data, registeredCount, isRegistered };
+          })
+        );
 
-      const validEvents = eventData.filter(Boolean);
-      setEvents(validEvents);
+        const cleanEvents = fetched
+          .filter(Boolean)
+          .sort((a, b) => {
+            const aTime = a.createdAt?.seconds || 0;
+            const bTime = b.createdAt?.seconds || 0;
+            return aTime - bTime;
+          });
 
-      const regMap = {};
-      validEvents.forEach(event => {
-        regMap[event.id] = event.isRegistered;
-      });
-      setRegisteredEvents(regMap);
-    } catch (err) {
-      console.error('Error fetching events:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+        const regMap = {};
+        cleanEvents.forEach(ev => regMap[ev.id] = ev.isRegistered);
+        setRegisteredEvents(regMap);
+        setEvents(cleanEvents);
+      } catch (err) {
+        console.error('Error fetching events:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchEvents();
+  }, []);
 
   const handleRegister = async (event) => {
-    const user = auth.currentUser;
-    if (!user) {
-      Alert.alert('Login Required', 'Please login to register.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Login', onPress: () => router.push('/auth') },
-      ]);
+    if (!currentUser) {
+      Alert.alert('Login Required', 'Please log in to register.');
       return;
     }
-  
-    if (user.uid === event.createdBy) {
-      ToastAndroid.show('You cannot register for your own event.', ToastAndroid.SHORT);
-      return;
-    }
-  
-    // ✅ NEW: Prevent double registration even if UI is stale
-    const regDoc = await getDoc(doc(db, 'registrations', event.id));
-    const data = regDoc.exists() ? regDoc.data() : {};
-    if (data[user.email]) {
-      ToastAndroid.show('You are already registered for this event.', ToastAndroid.SHORT);
-      return;
-    }
-  
-    Alert.alert('Confirm Registration', `RSVP for "${event.eventName}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Register',
-        onPress: async () => {
-          try {
-            setRegistering(event.id);
-            if (regDoc.exists()) {
-              await updateDoc(doc(db, 'registrations', event.id), {
-                [user.email]: true
-              });
-            } else {
-              await setDoc(doc(db, 'registrations', event.id), {
-                [user.email]: true
-              });
-            }
-  
-            setRegisteredEvents(prev => ({ ...prev, [event.id]: true }));
-            setEvents(prev => prev.map(ev =>
-              ev.id === event.id ? { ...ev, registeredCount: ev.registeredCount + 1 } : ev
-            ));
-            ToastAndroid.show('Registered!', ToastAndroid.SHORT);
-          } catch (err) {
-            ToastAndroid.show('Error registering!', ToastAndroid.SHORT);
-          } finally {
-            setRegistering(null);
+
+    setProcessingId(event.id);
+
+    try {
+      const allRegsSnapshot = await getDocs(collection(db, 'registrations'));
+
+      for (const docSnap of allRegsSnapshot.docs) {
+        const regData = docSnap.data();
+        if (regData[currentUser.uid]) {
+          const eventRef = doc(db, 'events', docSnap.id);
+          const conflictingEventSnap = await getDoc(eventRef);
+          const conflictingEvent = conflictingEventSnap.data();
+
+          const isSameTime =
+            event.date?.seconds === conflictingEvent?.date?.seconds &&
+            event.time === conflictingEvent?.time;
+
+          if (isSameTime) {
+            ToastAndroid.show(
+              'You are already registered for another event at the same time!',
+              ToastAndroid.LONG
+            );
+            setProcessingId(null);
+            return;
           }
         }
       }
-    ]);
-  };
-  
 
-  const handleLeaveEvent = async (event) => {
+      const ref = doc(db, 'registrations', event.id);
+      const snap = await getDoc(ref);
+
+      if (snap.exists()) {
+        await updateDoc(ref, { [currentUser.uid]: true });
+      } else {
+        await setDoc(ref, { [currentUser.uid]: true });
+      }
+
+      setRegisteredEvents(prev => ({ ...prev, [event.id]: true }));
+      setEvents(prev =>
+        prev.map(e =>
+          e.id === event.id ? { ...e, isRegistered: true, registeredCount: e.registeredCount + 1 } : e
+        )
+      );
+      ToastAndroid.show('Registered!', ToastAndroid.SHORT);
+    } catch (err) {
+      console.error(err);
+      ToastAndroid.show('Error registering!', ToastAndroid.SHORT);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleLeave = (event) => {
+    Alert.alert(
+      'Leave Event',
+      `Are you sure you want to leave "${event.eventName}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: () => confirmLeave(event),
+        },
+      ]
+    );
+  };
+
+  const confirmLeave = async (event) => {
     try {
-      const user = auth.currentUser;
       await updateDoc(doc(db, 'registrations', event.id), {
-        [user.email]: deleteField(),
+        [currentUser.uid]: deleteField(),
       });
 
       setRegisteredEvents(prev => ({ ...prev, [event.id]: false }));
-      setEvents(prev => prev.map(ev =>
-        ev.id === event.id ? { ...ev, registeredCount: ev.registeredCount - 1 } : ev
-      ));
+      setEvents(prev =>
+        prev.map(e =>
+          e.id === event.id ? { ...e, isRegistered: false, registeredCount: e.registeredCount - 1 } : e
+        )
+      );
       ToastAndroid.show('Left event.', ToastAndroid.SHORT);
     } catch (err) {
-      console.error('Leave error:', err);
+      console.error(err);
+      ToastAndroid.show('Error leaving event.', ToastAndroid.SHORT);
     }
   };
 
@@ -144,57 +174,72 @@ export default function ExplorePage() {
   };
 
   const filteredEvents = events.filter(event => {
-    const matchSearch = event.eventName?.toLowerCase().includes(search.toLowerCase())
-      || event.location?.toLowerCase().includes(search.toLowerCase());
-    const matchCategory = selectedCategory === 'All' || event.category === selectedCategory;
-    return matchSearch && matchCategory;
+    const matchSearch =
+      event.eventName?.toLowerCase().includes(search.toLowerCase()) ||
+      event.location?.toLowerCase().includes(search.toLowerCase());
+
+    const categoryMatch =
+      selectedCategory === 'All' || event.category === selectedCategory;
+
+    return matchSearch && categoryMatch;
   });
 
-  const handleCardPress = (event) => {
-    setSelectedEvent(event);
-    setModalVisible(true);
-  };
-
   const renderEvent = ({ item }) => {
-    const dateObj = new Date(item.date?.seconds * 1000);
-    const isCreator = item.createdBy === currentUser?.uid;
-    const isRegistered = registeredEvents[item.id];
-    const isLoading = registering === item.id;
+    const dateObj = item.date?.seconds
+      ? new Date(item.date.seconds * 1000)
+      : new Date();
+
+    const isHost = currentUser?.uid === item.createdBy;
     const isFull = item.maxAttendees && item.registeredCount >= item.maxAttendees;
+    const isRegistered = registeredEvents[item.id];
+
+    const buttonLabel = isHost
+      ? "You're Host"
+      : isRegistered
+        ? 'Leave Event'
+        : 'Register';
+
+    const disabled = isHost || (isFull && !isRegistered);
+
+    const handlePress = () => {
+      if (isRegistered) handleLeave(item);
+      else handleRegister(item);
+    };
 
     return (
-      <TouchableOpacity onPress={() => handleCardPress(item)} style={styles.card}>
+      <TouchableOpacity
+        style={styles.card}
+        onPress={() => {
+          setSelectedEvent(item);
+          setModalVisible(true);
+        }}
+      >
         <Image
-          source={item.imageUrl === 'default' || !item.imageUrl
-            ? require('../assets/images/default-event.png')
-            : { uri: item.imageUrl }}
+          source={
+            item.imageUrl === 'default' || !item.imageUrl
+              ? require('../assets/images/default-event.png')
+              : { uri: item.imageUrl }
+          }
           style={styles.image}
         />
         <Text style={styles.title}>{item.eventName}</Text>
-        <Text style={styles.meta}>📍 {item.location}</Text>
-        <Text style={styles.meta}>📅 {dateObj.toDateString()} ⏰ {dateObj.toLocaleTimeString()}</Text>
-        <Text style={styles.meta}>👥 Registered: {item.registeredCount} / {item.maxAttendees}</Text>
+        <Text style={styles.meta}>📍 {item.location || 'Unknown'}</Text>
+        <Text style={styles.meta}>
+          📅 {dateObj.toDateString()} | ⏰ {dateObj.toLocaleTimeString()}
+        </Text>
+        <Text style={styles.meta}>
+          👥 {item.registeredCount} / {item.maxAttendees || '∞'}
+        </Text>
 
-        {/* {isCreator && <Text style={styles.badgeCreator}>🎤 Hosted by Me</Text>} */}
-        {!isCreator && isRegistered && <Text style={styles.badgeAttendee}>✅ Registered</Text>}
-
-        {!isCreator && (
-          isFull && !isRegistered ? (
-            <View style={styles.fullLabel}>
-              <Text style={styles.fullLabelText}>Registration Full</Text>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={[styles.registerButton, isRegistered && { backgroundColor: '#999' }]}
-              onPress={() => isRegistered ? handleLeaveEvent(item) : handleRegister(item)}
-              disabled={isLoading}
-            >
-              <Text style={styles.registerButtonText}>
-                {isLoading ? 'Processing...' : isRegistered ? 'Leave Event' : 'Register'}
-              </Text>
-            </TouchableOpacity>
-          )
-        )}
+        <TouchableOpacity
+          style={[styles.button, (disabled || processingId === item.id) && styles.disabledBtn]}
+          disabled={disabled || processingId === item.id}
+          onPress={handlePress}
+        >
+          <Text style={styles.buttonText}>
+            {processingId === item.id ? 'Processing...' : buttonLabel}
+          </Text>
+        </TouchableOpacity>
       </TouchableOpacity>
     );
   };
@@ -203,33 +248,50 @@ export default function ExplorePage() {
     <View style={styles.container}>
       <TextInput
         style={styles.searchBox}
-        placeholder="Search events..."
+        placeholder="Search by name or location..."
         placeholderTextColor="#666"
         value={search}
         onChangeText={setSearch}
       />
-      <ScrollView horizontal style={styles.categoryContainer} showsHorizontalScrollIndicator={false}>
-        {getCategories().map((cat) => (
-          <TouchableOpacity
-            key={cat}
-            style={[styles.categoryPill, selectedCategory === cat && styles.activeCategoryPill]}
-            onPress={() => setSelectedCategory(cat)}
-          >
-            <Text style={[styles.categoryText, selectedCategory === cat && styles.activeCategoryText]}>
-              {cat}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+
+      <View style={styles.categoryContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.pillRow}
+        >
+          {getCategories().map(category => (
+            <TouchableOpacity
+              key={category}
+              style={[
+                styles.categoryPill,
+                selectedCategory === category && styles.activeCategoryPill,
+              ]}
+              onPress={() => setSelectedCategory(category)}
+            >
+              <Text
+                style={[
+                  styles.categoryText,
+                  selectedCategory === category && styles.activeCategoryText,
+                ]}
+              >
+                {category}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {loading ? (
         <ActivityIndicator size="large" color="#0055ff" style={{ marginTop: 40 }} />
+      ) : filteredEvents.length === 0 ? (
+        <Text style={styles.noEvents}>No events found.</Text>
       ) : (
         <FlatList
           data={filteredEvents}
-          renderItem={renderEvent}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ paddingBottom: 100 }}
+          renderItem={renderEvent}
+          contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 12 }}
           showsVerticalScrollIndicator={false}
         />
       )}
@@ -244,44 +306,72 @@ export default function ExplorePage() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', padding: 16 },
+  container: { flex: 1, backgroundColor: '#ffffff', padding: 16 },
   searchBox: {
-    backgroundColor: '#fff', padding: 12, borderRadius: 12, fontSize: 16,
-    marginBottom: 12, borderWidth: 1, borderColor: '#ccc',
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    fontSize: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
   },
   categoryContainer: { marginBottom: 14 },
+  pillRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 2 },
   categoryPill: {
-    backgroundColor: '#eee', paddingHorizontal: 18, paddingVertical: 10,
-    borderRadius: 20, marginRight: 10,
+    backgroundColor: '#eee',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 10,
   },
   activeCategoryPill: { backgroundColor: '#0055ff' },
-  categoryText: { color: '#333', fontSize: 15 },
-  activeCategoryText: { color: '#fff', fontWeight: 'bold' },
+  categoryText: { color: '#333', fontSize: 14 },
+  activeCategoryText: { color: '#fff', fontWeight: '600' },
   card: {
-    backgroundColor: '#fff', padding: 16, marginBottom: 14, borderRadius: 12,
-    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 6, elevation: 3,
+    backgroundColor: '#fff',
+    padding: 16,
+    marginBottom: 14,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  image: { width: '100%', height: 160, borderRadius: 10, marginBottom: 10 },
-  title: { fontSize: 18, fontWeight: '600', color: '#222', marginBottom: 4 },
-  meta: { fontSize: 14, color: '#666', marginBottom: 2 },
-  badgeCreator: {
-    backgroundColor: '#6200ea', color: '#fff', alignSelf: 'flex-start',
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, fontSize: 12,
-    marginTop: 6,
+  image: {
+    width: '100%',
+    height: 160,
+    borderRadius: 10,
+    marginBottom: 10,
+    backgroundColor: '#e0e0e0',
   },
-  badgeAttendee: {
-    backgroundColor: '#00b894', color: '#fff', alignSelf: 'flex-start',
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, fontSize: 12,
-    marginTop: 6,
+  title: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 4,
+    color: '#333',
   },
-  registerButton: {
-    backgroundColor: '#0055ff', paddingVertical: 10, borderRadius: 8,
-    marginTop: 10, alignItems: 'center',
+  meta: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
   },
-  registerButtonText: { color: '#fff', fontWeight: 'bold' },
-  fullLabel: {
-    backgroundColor: '#999', paddingVertical: 10, borderRadius: 8,
-    marginTop: 10, alignItems: 'center',
+  button: {
+    backgroundColor: '#0055ff',
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 10,
+    alignItems: 'center',
   },
-  fullLabelText: { color: '#fff', fontWeight: 'bold' },
+  buttonText: { color: '#fff', fontWeight: 'bold' },
+  disabledBtn: {
+    backgroundColor: '#ccc',
+  },
+  noEvents: {
+    textAlign: 'center',
+    marginTop: 60,
+    fontSize: 16,
+    color: '#999',
+  },
 });

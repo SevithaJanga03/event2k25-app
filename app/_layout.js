@@ -1,29 +1,35 @@
 import { Slot, usePathname } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { View, StyleSheet, Platform, StatusBar } from 'react-native';
+import {
+  View, StyleSheet, Platform, StatusBar,
+} from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import CustomHeader from './components/CustomHeader';
 import CustomBottomTabs from './components/CustomBottomTabs';
 
-export default function Layout() {
+function AppLayoutContent() {
+  const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const hideTabs = pathname === '/auth';
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.container}>
-        <StatusBar barStyle="dark-content" />
-        
-        {/* ✅ Top logo and login/logout */}
-        <CustomHeader />
-        
-        {/* ✅ Slot for screens like Explore, Create, Auth */}
-        <View style={styles.content}>
-          <Slot />
-        </View>
-        
-        {/* ✅ Bottom navigator unless on login */}
-        {!hideTabs && <CustomBottomTabs />}
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
+      <CustomHeader />
+      <View style={styles.content}>
+        <Slot />
       </View>
+      {!hideTabs && <CustomBottomTabs />}
+    </View>
+  );
+}
+
+export default function Layout() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <AppLayoutContent />
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
@@ -31,7 +37,6 @@ export default function Layout() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
     backgroundColor: '#fff',
   },
   content: {
