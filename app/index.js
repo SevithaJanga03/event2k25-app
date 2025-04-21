@@ -8,6 +8,9 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
 import EventDetailsModal from './components/EventDetailsModal';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { Ionicons } from '@expo/vector-icons'; // For calendar icon
+
 
 export default function ExplorePage() {
   const [events, setEvents] = useState([]);
@@ -19,6 +22,9 @@ export default function ExplorePage() {
   const [currentUser, setCurrentUser] = useState(null);
   const [registeredEvents, setRegisteredEvents] = useState({});
   const [processingId, setProcessingId] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(setCurrentUser);
@@ -60,7 +66,7 @@ export default function ExplorePage() {
           .sort((a, b) => {
             const aTime = a.createdAt?.seconds || 0;
             const bTime = b.createdAt?.seconds || 0;
-            return aTime - bTime;
+            return bTime - aTime;
           });
 
         const regMap = {};
@@ -134,6 +140,15 @@ export default function ExplorePage() {
     }
   };
 
+  const handleDateChange = (event, date) => {
+    setShowDatePicker(false); // ✅ Always hide it, even if user cancels
+  
+    if (event.type === "set" && date) {
+      // User selected a date
+      setSelectedDate(date);
+    }
+  };
+
   const handleLeave = (event) => {
     Alert.alert(
       'Leave Event',
@@ -177,12 +192,17 @@ export default function ExplorePage() {
     const matchSearch =
       event.eventName?.toLowerCase().includes(search.toLowerCase()) ||
       event.location?.toLowerCase().includes(search.toLowerCase());
-
+  
     const categoryMatch =
       selectedCategory === 'All' || event.category === selectedCategory;
-
-    return matchSearch && categoryMatch;
+  
+    const dateMatch =
+      !selectedDate ||
+      new Date(event.date?.seconds * 1000).toDateString() === selectedDate.toDateString();
+  
+    return matchSearch && categoryMatch && dateMatch;
   });
+  
 
   const renderEvent = ({ item }) => {
     const dateObj = item.date?.seconds
@@ -246,13 +266,43 @@ export default function ExplorePage() {
 
   return (
     <View style={styles.container}>
-      <TextInput
-        style={styles.searchBox}
-        placeholder="Search by name or location..."
-        placeholderTextColor="#666"
-        value={search}
-        onChangeText={setSearch}
-      />
+      <View style={styles.searchRow}>
+  <TextInput
+    style={styles.searchBox}
+    placeholder="Search by name or location..."
+    placeholderTextColor="#666"
+    value={search + (selectedDate ? ` | ${selectedDate.toDateString()}` : '')}
+    onChangeText={text => {
+      if (selectedDate) setSelectedDate(null); // Reset date if user types
+      setSearch(text);
+    }}
+  />
+
+  {selectedDate && (
+    <TouchableOpacity onPress={() => setSelectedDate(null)} style={styles.iconWrap}>
+      <Text style={styles.clearIcon}>❌</Text>
+    </TouchableOpacity>
+  )}
+
+  <TouchableOpacity onPress={() => setShowDatePicker(true)} style={styles.iconWrap}>
+    <Text style={styles.icon}>📅</Text>
+  </TouchableOpacity>
+</View>
+        {showDatePicker && (
+          <DateTimePicker
+            value={selectedDate || new Date()}
+            mode="date"
+            display="default"
+            minimumDate={new Date()}
+            onChange={(event, date) => {
+              setShowDatePicker(false);
+              if (event.type === 'set' && date) {
+                setSelectedDate(date);
+              }
+            }}
+          />
+        )}
+
 
       <View style={styles.categoryContainer}>
         <ScrollView
@@ -281,7 +331,7 @@ export default function ExplorePage() {
           ))}
         </ScrollView>
       </View>
-
+     
       {loading ? (
         <ActivityIndicator size="large" color="#0055ff" style={{ marginTop: 40 }} />
       ) : filteredEvents.length === 0 ? (
@@ -306,19 +356,52 @@ export default function ExplorePage() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#ffffff', padding: 16 },
+  container: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    padding: 16,
+  },
+
+  // 🔍 Search Bar + Calendar Row
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
   searchBox: {
+    flex: 1,
     backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: 12,
-    fontSize: 16,
-    marginBottom: 12,
+    fontSize: 15,
     borderWidth: 1,
     borderColor: '#ddd',
   },
-  categoryContainer: { marginBottom: 14 },
-  pillRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 2 },
+  iconWrap: {
+    marginLeft: 8,
+    padding: 8,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+  },
+  icon: {
+    fontSize: 18,
+    color: '#333',
+  },
+  clearIcon: {
+    fontSize: 16,
+    color: '#ff4444',
+  },
+
+  // 🏷️ Category Pills
+  categoryContainer: {
+    marginBottom: 12,
+  },
+  pillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 2,
+  },
   categoryPill: {
     backgroundColor: '#eee',
     paddingHorizontal: 14,
@@ -326,9 +409,37 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginRight: 10,
   },
-  activeCategoryPill: { backgroundColor: '#0055ff' },
-  categoryText: { color: '#333', fontSize: 14 },
-  activeCategoryText: { color: '#fff', fontWeight: '600' },
+  activeCategoryPill: {
+    backgroundColor: '#0055ff',
+  },
+  categoryText: {
+    color: '#333',
+    fontSize: 14,
+  },
+  activeCategoryText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+
+  // 📅 Date Info Row (optional)
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  dateText: {
+    fontSize: 14,
+    color: '#444',
+  },
+  clearText: {
+    color: '#ff4444',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+
+  // 📦 Event Cards
   card: {
     backgroundColor: '#fff',
     padding: 16,
@@ -337,6 +448,7 @@ const styles = StyleSheet.create({
     shadowColor: '#000',
     shadowOpacity: 0.06,
     shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
   image: {
@@ -364,14 +476,47 @@ const styles = StyleSheet.create({
     marginTop: 10,
     alignItems: 'center',
   },
-  buttonText: { color: '#fff', fontWeight: 'bold' },
+  buttonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
   disabledBtn: {
     backgroundColor: '#ccc',
   },
+
+  // 📭 Empty state
   noEvents: {
     textAlign: 'center',
     marginTop: 60,
     fontSize: 16,
     color: '#999',
   },
+
+  // 📅 Date Picker Overlay (custom modal)
+  pickerOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  pickerModal: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    elevation: 4,
+    width: '85%',
+  },
+  pickerButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 12,
+  },
+  pickerBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0055ff',
+  },
 });
+
