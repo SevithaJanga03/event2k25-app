@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  Alert, ActivityIndicator, ScrollView, Dimensions, Image,
+  Alert, ScrollView, Dimensions, Image,
   KeyboardAvoidingView, Platform
 } from 'react-native';
 import { auth, db } from '../firebaseConfig';
@@ -50,6 +50,7 @@ export default function ProfilePage() {
       }
 
       try {
+
         const docSnap = await getDoc(doc(db, 'users', user.uid));
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -64,7 +65,7 @@ export default function ProfilePage() {
             imageUrl: data.imageUrl || ''
           });
         }
-        await fetchRegisteredEvents();
+        await fetchRegisteredEvents(user.uid);
       } catch (err) {
         console.error(err);
         setError('Failed to load profile data.');
@@ -76,36 +77,25 @@ export default function ProfilePage() {
     return unsubscribe;
   }, []);
 
-  const fetchRegisteredEvents = async () => {
+  const fetchRegisteredEvents = async (uid) => {
     try {
-      const user = auth.currentUser;
-      if (!user) return;
-
-      console.log('Current User:', user.email )
-  
       const eventsSnap = await getDocs(collection(db, 'events'));
       const registered = [];
   
       for (const docSnap of eventsSnap.docs) {
         const eventData = { id: docSnap.id, ...docSnap.data() };
   
-        // Check in /registrations/{eventId} if user.email exists
+        // 🔁 Check from /registrations/{eventId}
         const regDoc = await getDoc(doc(db, 'registrations', docSnap.id));
         const regData = regDoc.exists() ? regDoc.data() : {};
   
-        if (regData[user.email]) {
+        if (regData[uid]) {
           registered.push(eventData);
+        } else {
         }
       }
   
-      const sorted = registered.sort((a, b) => {
-        const aDate = a.date?.seconds || 0;
-        const bDate = b.date?.seconds || 0;
-        return aDate - bDate;
-      });
-      
-      console.log('Resgistered Events:', sorted);
-      setRegisteredEvents(sorted);
+      setRegisteredEvents(registered);
     } catch (err) {
       console.error('Error fetching registered events:', err);
     }
@@ -320,28 +310,27 @@ export default function ProfilePage() {
   const EventsRoute = () => (
     <ScrollView contentContainerStyle={{ padding: 20 }}>
       {registeredEvents.length === 0 ? (
-  <Text style={styles.noEvents}>You have not registered for any events yet.</Text>
-) : (
-  registeredEvents.map(event => {
-    const dateObj = new Date(event.date?.seconds * 1000);
+        <Text style={styles.noEvents}>You have not registered for any events yet.</Text>
+      ) : (
+        registeredEvents.map(event => {
+          const dateObj = new Date(event.date?.seconds * 1000);
 
-    return (
-      <View key={event.id} style={styles.eventCard}>
-        <Image
-          source={event.imageUrl === 'default' || !event.imageUrl
-            ? require('../assets/images/default-event.png')
-            : { uri: event.imageUrl }}
-          style={{ width: '100%', height: 160, borderRadius: 10, marginBottom: 10 }}
-        />
-        <Text style={styles.eventTitle}>{event.eventName}</Text>
-        <Text style={styles.eventMeta}>📍 {event.location}</Text>
-        <Text style={styles.eventMeta}>📅 {dateObj.toDateString()} ⏰ {dateObj.toLocaleTimeString()}</Text>
-        <Text style={styles.eventMeta}>👥 Registered</Text>
-      </View>
-    );
-  })
-)}
-
+          return (
+            <View key={event.id} style={styles.eventCard}>
+              <Image
+                source={event.imageUrl === 'default' || !event.imageUrl
+                  ? require('../assets/images/default-event.png')
+                  : { uri: event.imageUrl }}
+                style={{ width: '100%', height: 160, borderRadius: 10, marginBottom: 10 }}
+              />
+              <Text style={styles.eventTitle}>{event.eventName}</Text>
+              <Text style={styles.eventMeta}>📍 {event.location}</Text>
+              <Text style={styles.eventMeta}>📅 {dateObj.toDateString()} ⏰ {dateObj.toLocaleTimeString()}</Text>
+              <Text style={styles.eventMeta}>👥 Registered</Text>
+            </View>
+          );
+        })
+      )}
     </ScrollView>
   );
 
@@ -490,3 +479,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
