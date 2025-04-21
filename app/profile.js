@@ -224,7 +224,7 @@ export default function ProfilePage() {
           )}
         </TouchableOpacity>
         <Text style={{ fontSize: 12, color: '#888', marginTop: 6 }}>
-          Tap to upload/change
+          Tap edit icon to upload/change
         </Text>
       </View>
 
