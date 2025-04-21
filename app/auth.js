@@ -6,7 +6,8 @@ import {
 import { useRouter } from 'expo-router';
 import {
   createUserWithEmailAndPassword,
-  signInWithEmailAndPassword
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
 } from 'firebase/auth';
 import { auth, db } from '../firebaseConfig';
 import { setDoc, doc } from 'firebase/firestore';
@@ -59,6 +60,23 @@ export default function AuthScreen() {
   };
 
   const getFirebaseErrorMessage = (code, type) => {
+    if (type === 'signin') {
+      if (
+        code === 'auth/user-not-found' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/invalid-login-credentials' ||
+        code === 'auth/invalid-credential'
+      ) return 'Invalid email or password.';
+      if (code === 'auth/invalid-email') return 'Invalid email format.';
+      if (code === 'auth/network-request-failed') return 'Check your internet connection.';
+      return 'An unexpected error occurred. Please try again.';
+    } else {
+      if (code === 'auth/email-already-in-use') return 'This email is already registered.';
+      if (code === 'auth/invalid-email') return 'Invalid email format.';
+      if (code === 'auth/weak-password') return 'Password must be at least 6 characters.';
+      if (code === 'auth/network-request-failed') return 'Check your internet connection.';
+      return 'An unexpected error occurred. Please try again.';
+    }
     const signinMessages = {
       'auth/user-not-found': 'Invalid email or password.',
       'auth/wrong-password': 'Invalid email or password.',
@@ -86,6 +104,27 @@ export default function AuthScreen() {
 
     try {
       if (formType === 'signup') {
+
+        try {
+          const result = await createUserWithEmailAndPassword(
+            auth,
+            formData.email,
+            formData.password
+          );
+
+          await setDoc(doc(db, 'users', result.user.uid), {
+            fullName: formData.fullName,
+            email: formData.email,
+          });
+
+          console.log('✅ Sign-up success:', result.user?.email);
+          Alert.alert('🎉 Success', 'Account created successfully!');
+          router.replace('/');
+        } catch (err) {
+          console.error('❌ Sign-up error:', err.code, err.message);
+          const message = getFirebaseErrorMessage(err.code, 'signup');
+          setErrors({ general: message });
+        }
         const result = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
 
         await setDoc(doc(db, 'users', result.user.uid), {
@@ -96,6 +135,7 @@ export default function AuthScreen() {
 
         Alert.alert('🎉 Success', 'Account created successfully!');
         router.replace('/');
+
       } else {
         await signInWithEmailAndPassword(auth, formData.email, formData.password);
         Alert.alert('✅ Welcome', 'Signed in successfully!');
@@ -104,6 +144,24 @@ export default function AuthScreen() {
     } catch (err) {
       const message = getFirebaseErrorMessage(err.code, formType);
       setErrors({ general: message });
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!formData.email.trim()) {
+      Alert.alert('❗ Enter your email', 'Please enter your email to receive a reset link.');
+      return;
+    }
+
+    try {
+      await sendPasswordResetEmail(auth, formData.email);
+      Alert.alert('📧 Email Sent', 'Check your inbox for password reset instructions.');
+    } catch (error) {
+      console.error('❌ Reset Error:', error.code, error.message);
+      let message = 'An error occurred. Try again.';
+      if (error.code === 'auth/user-not-found') message = 'No account found with this email.';
+      if (error.code === 'auth/invalid-email') message = 'Enter a valid email.';
+      Alert.alert('❗ Error', message);
     }
   };
 
@@ -158,6 +216,12 @@ export default function AuthScreen() {
             <Text style={styles.helper}>Password must be at least 6 characters.</Text>
           )}
           {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
+
+          {formType === 'signin' && (
+            <TouchableOpacity onPress={handleForgotPassword}>
+              <Text style={styles.forgotText}>Forgot Password?</Text>
+            </TouchableOpacity>
+          )}
 
           {formType === 'signup' && (
             <>
@@ -258,5 +322,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#0055ff',
     marginTop: 6,
+  },
+  forgotText: {
+    textAlign: 'right',
+    color: '#0055ff',
+    marginTop: 4,
+    marginBottom: 10,
+    fontSize: 14,
   },
 });
