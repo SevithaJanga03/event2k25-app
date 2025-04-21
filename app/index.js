@@ -74,12 +74,20 @@ export default function ExplorePage() {
       ]);
       return;
     }
-
+  
     if (user.uid === event.createdBy) {
       ToastAndroid.show('You cannot register for your own event.', ToastAndroid.SHORT);
       return;
     }
-
+  
+    // ✅ NEW: Prevent double registration even if UI is stale
+    const regDoc = await getDoc(doc(db, 'registrations', event.id));
+    const data = regDoc.exists() ? regDoc.data() : {};
+    if (data[user.email]) {
+      ToastAndroid.show('You are already registered for this event.', ToastAndroid.SHORT);
+      return;
+    }
+  
     Alert.alert('Confirm Registration', `RSVP for "${event.eventName}"?`, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -87,14 +95,16 @@ export default function ExplorePage() {
         onPress: async () => {
           try {
             setRegistering(event.id);
-            const ref = doc(db, 'registrations', event.id);
-            const snap = await getDoc(ref);
-            if (snap.exists()) {
-              await updateDoc(ref, { [user.email]: true });
+            if (regDoc.exists()) {
+              await updateDoc(doc(db, 'registrations', event.id), {
+                [user.email]: true
+              });
             } else {
-              await setDoc(ref, { [user.email]: true });
+              await setDoc(doc(db, 'registrations', event.id), {
+                [user.email]: true
+              });
             }
-
+  
             setRegisteredEvents(prev => ({ ...prev, [event.id]: true }));
             setEvents(prev => prev.map(ev =>
               ev.id === event.id ? { ...ev, registeredCount: ev.registeredCount + 1 } : ev
@@ -109,6 +119,7 @@ export default function ExplorePage() {
       }
     ]);
   };
+  
 
   const handleLeaveEvent = async (event) => {
     try {

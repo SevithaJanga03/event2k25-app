@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
 } from 'firebase/auth';
 import { auth, db } from '../firebaseConfig';
 import { setDoc, doc } from 'firebase/firestore';
@@ -89,7 +90,6 @@ export default function AuthScreen() {
             formData.password
           );
 
-          // ✅ Store full name in Firestore under 'users' collection
           await setDoc(doc(db, 'users', result.user.uid), {
             fullName: formData.fullName,
             email: formData.email,
@@ -119,6 +119,24 @@ export default function AuthScreen() {
           setErrors({ general: message });
         }
       }
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!formData.email.trim()) {
+      Alert.alert('❗ Enter your email', 'Please enter your email to receive a reset link.');
+      return;
+    }
+
+    try {
+      await sendPasswordResetEmail(auth, formData.email);
+      Alert.alert('📧 Email Sent', 'Check your inbox for password reset instructions.');
+    } catch (error) {
+      console.error('❌ Reset Error:', error.code, error.message);
+      let message = 'An error occurred. Try again.';
+      if (error.code === 'auth/user-not-found') message = 'No account found with this email.';
+      if (error.code === 'auth/invalid-email') message = 'Enter a valid email.';
+      Alert.alert('❗ Error', message);
     }
   };
 
@@ -173,6 +191,12 @@ export default function AuthScreen() {
             <Text style={styles.helper}>Password must be at least 6 characters.</Text>
           )}
           {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
+
+          {formType === 'signin' && (
+            <TouchableOpacity onPress={handleForgotPassword}>
+              <Text style={styles.forgotText}>Forgot Password?</Text>
+            </TouchableOpacity>
+          )}
 
           {formType === 'signup' && (
             <>
@@ -273,5 +297,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#0055ff',
     marginTop: 6,
+  },
+  forgotText: {
+    textAlign: 'right',
+    color: '#0055ff',
+    marginTop: 4,
+    marginBottom: 10,
+    fontSize: 14,
   },
 });
