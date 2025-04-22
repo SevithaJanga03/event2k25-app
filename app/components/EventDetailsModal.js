@@ -80,8 +80,10 @@ export default function EventDetailsModal({ visible, event, onClose }) {
           </ScrollView>
 
           <TouchableOpacity onPress={handleShare} style={styles.shareBtn}>
-            <Ionicons name="share-social-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
-            <Text style={styles.shareText}>Share This Event</Text>
+            <View style={styles.shareContent}>
+              <Ionicons name="share-social-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+              <Text style={styles.shareText}>Share This Event</Text>
+            </View>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
@@ -106,12 +108,31 @@ const styles = StyleSheet.create({
   attendeeTitle: { fontSize: 15, fontWeight: 'bold', marginTop: 10, color: '#222' },
   attendeeText: { fontSize: 13, color: '#555', marginTop: 4 },
   shareBtn: {
-    flexDirection: 'row', backgroundColor: '#888', paddingVertical: 10, paddingHorizontal: 14,
-    borderRadius: 12, alignItems: 'center', alignSelf: 'center', marginTop: 10, width: '100%' ,
+    backgroundColor: '#0055ff',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginTop: 10,
+    width: '100%',
   },
-  shareText: { color: '#fff', fontWeight: '600', fontSize: 14, alignContent: 'center' },
+  
+  shareContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
+  shareText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  
   closeBtn: {
-    backgroundColor: '#0055ff', marginTop: 10, paddingVertical: 12, borderRadius: 8, alignItems: 'center'
+    backgroundColor: '#888', marginTop: 10, paddingVertical: 12, borderRadius: 8, alignItems: 'center'
   },
   closeText: { color: '#fff', fontWeight: '600' },
 });

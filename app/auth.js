@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, Alert, LogBox 
+  KeyboardAvoidingView, Platform, ScrollView, Alert, LogBox , ToastAndroid
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
@@ -11,12 +11,17 @@ import {
 } from 'firebase/auth';
 import { auth, db } from '../firebaseConfig';
 import { setDoc, doc } from 'firebase/firestore';
+import { sendEmailVerification } from 'firebase/auth';
+
 
 
 LogBox.ignoreLogs([
   'auth/invalid-credential',
   'auth/invalid-login-credentials',
   'Possible Unhandled Promise Rejection',
+  'auth/email-already-in-use',
+  'auth/invalid-email',
+  'auth/too-many-requests',
 ]);
 
 export default function AuthScreen() {
@@ -99,53 +104,84 @@ export default function AuthScreen() {
       : signupMessages[code] || fallback;
   };
 
-  const handleSubmit = async () => {
-    if (!validateForm()) return;
+const handleSubmit = async () => {
+  if (!validateForm()) return;
 
-    try {
-      if (formType === 'signup') {
+  try {
+    if (formType === 'signup') {
+      const result = await createUserWithEmailAndPassword(
+        auth,
+        formData.email,
+        formData.password
+      );
 
-        try {
-          const result = await createUserWithEmailAndPassword(
-            auth,
-            formData.email,
-            formData.password
-          );
+      // Save user to Firestore
+      await setDoc(doc(db, 'users', result.user.uid), {
+        fullName: formData.fullName,
+        email: formData.email,
+        createdAt: new Date(),
+      });
 
-          await setDoc(doc(db, 'users', result.user.uid), {
-            fullName: formData.fullName,
-            email: formData.email,
-          });
+      // Send verification email
+      await sendEmailVerification(result.user);
 
-          console.log('✅ Sign-up success:', result.user?.email);
-          Alert.alert('🎉 Success', 'Account created successfully!');
-          router.replace('/');
-        } catch (err) {
-          console.error('❌ Sign-up error:', err.code, err.message);
-          const message = getFirebaseErrorMessage(err.code, 'signup');
-          setErrors({ general: message });
-        }
-        const result = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+      Alert.alert(
+        '📧 Verify Email',
+        'A verification email has been sent. Please verify before signing in.'
+      );
 
-        await setDoc(doc(db, 'users', result.user.uid), {
-          fullName: formData.fullName,
-          email: formData.email,
-          createdAt: new Date()
-        });
-
-        Alert.alert('🎉 Success', 'Account created successfully!');
-        router.replace('/');
-
-      } else {
-        await signInWithEmailAndPassword(auth, formData.email, formData.password);
-        Alert.alert('✅ Welcome', 'Signed in successfully!');
-        router.replace('/');
+      // Sign out after sending verification
+      auth.signOut();
+      router.replace('/');
+    } else {
+      const result = await signInWithEmailAndPassword(
+        auth,
+        formData.email,
+        formData.password
+      );
+      
+      if (!result.user.emailVerified) {
+        await auth.signOut();
+        Alert.alert(
+          '⛔ Email Not Verified',
+          'Please verify your email before signing in.',
+          [
+            {
+              text: 'Resend Verification Email',
+              onPress: async () => {
+                try {
+                  await sendEmailVerification(result.user);
+                  if (Platform.OS === 'android') {
+                    ToastAndroid.show('📧 Verification email resent!', ToastAndroid.SHORT);
+                  } else {
+                    Alert.alert('Success', 'Verification email resent!');
+                  }
+                } catch (error) {
+                  console.error('Resend failed:', error);
+                  if (Platform.OS === 'android') {
+                    ToastAndroid.show('❌ Failed to resend email.', ToastAndroid.SHORT);
+                  } else {
+                    Alert.alert('Error', 'Failed to resend verification email.');
+                  }
+                }
+              }
+            },
+            { text: 'OK', style: 'cancel' }
+          ]
+        );
+        return;
       }
-    } catch (err) {
-      const message = getFirebaseErrorMessage(err.code, formType);
-      setErrors({ general: message });
+
+      Alert.alert('✅ Welcome', 'Signed in successfully!');
+      router.replace('/');
     }
-  };
+  } catch (err) {
+    console.error('Auth Error:', err.code, err.message);
+    const message = getFirebaseErrorMessage(err.code, formType);
+    setErrors({ general: message });
+  }
+};
+
 
   const handleForgotPassword = async () => {
     if (!formData.email.trim()) {
@@ -162,6 +198,28 @@ export default function AuthScreen() {
       if (error.code === 'auth/user-not-found') message = 'No account found with this email.';
       if (error.code === 'auth/invalid-email') message = 'Enter a valid email.';
       Alert.alert('❗ Error', message);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    try {
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        formData.email,
+        formData.password
+      );
+  
+      const user = userCredential.user;
+      if (user.emailVerified) {
+        Alert.alert("✅ Already Verified", "Your email is already verified.");
+      } else {
+        await sendEmailVerification(user);
+        Alert.alert("📧 Email Sent", "Verification link has been sent again.");
+        await auth.signOut(); // optional
+      }
+    } catch (error) {
+      console.error("Resend Error:", error.code, error.message);
+      Alert.alert("❌ Error", getFirebaseErrorMessage(error.code, 'signin'));
     }
   };
 
@@ -218,9 +276,9 @@ export default function AuthScreen() {
           {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
 
           {formType === 'signin' && (
-            <TouchableOpacity onPress={handleForgotPassword}>
-              <Text style={styles.forgotText}>Forgot Password?</Text>
-            </TouchableOpacity>
+              <TouchableOpacity onPress={handleForgotPassword}>
+                <Text style={styles.forgotText}>Forgot Password?</Text>
+              </TouchableOpacity>
           )}
 
           {formType === 'signup' && (
@@ -327,6 +385,12 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     color: '#0055ff',
     marginTop: 4,
+    marginBottom: 10,
+    fontSize: 14,
+  },
+  resendText: {
+    textAlign: 'right',
+    color: '#ff8c00',
     marginBottom: 10,
     fontSize: 14,
   },

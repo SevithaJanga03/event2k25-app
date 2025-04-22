@@ -140,15 +140,27 @@ const EventsRoute = ({ registeredEvents }) => (
     ) : (
       registeredEvents.map(event => {
         const dateObj = new Date(event.date?.seconds * 1000);
+        const isExpired = dateObj < new Date();
 
         return (
-          <View key={event.id} style={styles.eventCard}>
+          <View
+            key={event.id}
+            style={[
+              styles.eventCard,
+              isExpired && styles.expiredCard,
+            ]}
+          >
             <Image
               source={event.imageUrl === 'default' || !event.imageUrl
                 ? require('../assets/images/default-event.png')
                 : { uri: event.imageUrl }}
-              style={{ width: '100%', height: 160, borderRadius: 10, marginBottom: 10 }}
+              style={styles.image}
             />
+            {isExpired && (
+              <View style={styles.expiredBadge}>
+                <Text style={styles.expiredText}>Expired</Text>
+              </View>
+            )}
             <Text style={styles.eventTitle}>{event.eventName}</Text>
             <Text style={styles.eventMeta}>📍 {event.location}</Text>
             <Text style={styles.eventMeta}>📅 {dateObj.toDateString()} ⏰ {dateObj.toLocaleTimeString()}</Text>
@@ -159,6 +171,7 @@ const EventsRoute = ({ registeredEvents }) => (
     )}
   </ScrollView>
 );
+
 
 // ---------------- Main Component ----------------
 export default function ProfilePage() {
@@ -364,7 +377,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#ddd',
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#fff',
   },
   activeTab: {
     color: '#0055ff',
@@ -376,8 +389,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     fontSize: 16,
   },
-
-
+  image: {
+    width: '100%',
+    height: 160,
+    borderRadius: 10,
+    marginBottom: 10,
+    backgroundColor: '#e0e0e0',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -473,10 +491,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   eventCard: {
-    backgroundColor: '#f6f9ff',
-    padding: 14,
-    borderRadius: 10,
-    marginBottom: 10,
+    backgroundColor: '#fff',
+    padding: 16,
+    marginBottom: 14,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
     borderWidth: 1,
     borderColor: '#dde3f0',
   },
@@ -496,5 +519,26 @@ const styles = StyleSheet.create({
     marginTop: 10,
     textAlign: 'center',
   },
+  expiredCard: {
+    backgroundColor: '#f0f0f0',
+  },
+  
+  expiredBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: '#d9534f',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    zIndex: 2,
+  },
+  
+  expiredText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  
 });
 
