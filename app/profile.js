@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   Alert, ScrollView, Dimensions, Image,
@@ -17,11 +17,150 @@ import {
 } from 'firebase/auth';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { TabView, SceneMap, TabBar } from 'react-native-tab-view';
 import * as ImagePicker from 'expo-image-picker';
 
-const initialLayout = { width: Dimensions.get('window').width };
+// ---------------- Profile Route ----------------
+const ProfileRoute = ({
+  userData, setUserData, originalData, editing, setEditing,
+  error, setError, saving, handleSave,
+  formData, setFormData, changingPassword, setChangingPassword,
+  handlePasswordChange, pickImage
+}) => (
+  <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20 }}>
+    <View style={styles.header}>
+      <Text style={styles.title}>My Profile</Text>
+      {!editing && (
+        <TouchableOpacity onPress={() => setEditing(true)}>
+          <Feather name="edit-3" size={22} color="#0055ff" />
+        </TouchableOpacity>
+      )}
+    </View>
 
+    <View style={styles.profilePicContainer}>
+      <TouchableOpacity onPress={pickImage}>
+        {userData.imageUrl ? (
+          <Image source={{ uri: userData.imageUrl }} style={styles.profilePic} />
+        ) : (
+          <View style={styles.profilePicPlaceholder}>
+            <Feather name="user" size={40} color="#aaa" />
+          </View>
+        )}
+      </TouchableOpacity>
+      <Text style={{ fontSize: 12, color: '#888', marginTop: 6 }}>
+        Tap to upload/change
+      </Text>
+    </View>
+
+    {error !== '' && <Text style={styles.error}>{error}</Text>}
+
+    <Text style={styles.label}>Full Name</Text>
+    <TextInput
+      style={styles.input}
+      value={userData.fullName}
+      onChangeText={(text) => setUserData({ ...userData, fullName: text })}
+      editable={editing}
+      placeholder="Enter your full name"
+    />
+
+    <Text style={styles.label}>Email</Text>
+    <TextInput
+      style={styles.input}
+      value={userData.email}
+      onChangeText={(text) => setUserData({ ...userData, email: text })}
+      editable={editing}
+      keyboardType="email-address"
+      autoCapitalize="none"
+      placeholder="Enter your email"
+    />
+
+    {editing && (
+      <View style={styles.buttonRow}>
+        <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
+          <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.cancelButton} onPress={() => {
+          setUserData({ ...originalData });
+          setEditing(false);
+          setError('');
+        }}>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    )}
+
+    {!changingPassword ? (
+      <TouchableOpacity
+        style={styles.changePasswordBtn}
+        onPress={() => setChangingPassword(true)}
+      >
+        <Text style={styles.changePasswordText}>Change Password</Text>
+      </TouchableOpacity>
+    ) : (
+      <>
+        <Text style={styles.label}>Current Password</Text>
+        <TextInput
+          style={styles.input}
+          secureTextEntry
+          value={formData.currentPassword}
+          onChangeText={(text) => setFormData({ ...formData, currentPassword: text })}
+          placeholder="Enter current password"
+        />
+
+        <Text style={styles.label}>New Password</Text>
+        <TextInput
+          style={styles.input}
+          secureTextEntry
+          value={formData.newPassword}
+          onChangeText={(text) => setFormData({ ...formData, newPassword: text })}
+          placeholder="Enter new password"
+        />
+
+        <View style={styles.buttonRow}>
+          <TouchableOpacity style={styles.saveButton} backgroundColor='#0055ff' onPress={handlePasswordChange}>
+            <Text style={styles.saveButtonText}>Update Password</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.cancelButton} onPress={() => {
+            setFormData({ currentPassword: '', newPassword: '' });
+            setChangingPassword(false);
+            setError('');
+          }}>
+            <Text style={styles.cancelButtonText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </>
+    )}
+  </ScrollView>
+);
+
+// ---------------- Events Route ----------------
+const EventsRoute = ({ registeredEvents }) => (
+  <ScrollView contentContainerStyle={{ padding: 20 }}>
+    {registeredEvents.length === 0 ? (
+      <Text style={styles.noEvents}>You have not registered for any events yet.</Text>
+    ) : (
+      registeredEvents.map(event => {
+        const dateObj = new Date(event.date?.seconds * 1000);
+
+        return (
+          <View key={event.id} style={styles.eventCard}>
+            <Image
+              source={event.imageUrl === 'default' || !event.imageUrl
+                ? require('../assets/images/default-event.png')
+                : { uri: event.imageUrl }}
+              style={{ width: '100%', height: 160, borderRadius: 10, marginBottom: 10 }}
+            />
+            <Text style={styles.eventTitle}>{event.eventName}</Text>
+            <Text style={styles.eventMeta}>📍 {event.location}</Text>
+            <Text style={styles.eventMeta}>📅 {dateObj.toDateString()} ⏰ {dateObj.toLocaleTimeString()}</Text>
+            <Text style={styles.eventMeta}>👥 Registered</Text>
+          </View>
+        );
+      })
+    )}
+  </ScrollView>
+);
+
+// ---------------- Main Component ----------------
 export default function ProfilePage() {
   const [userData, setUserData] = useState({ fullName: '', email: '', imageUrl: '' });
   const [originalData, setOriginalData] = useState({ fullName: '', email: '', imageUrl: '' });
@@ -32,11 +171,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [index, setIndex] = useState(0);
-  const [routes] = useState([
-    { key: 'profile', title: 'Profile' },
-    { key: 'events', title: 'My Registrations' }
-  ]);
+  const [activeTab, setActiveTab] = useState('profile');
 
   const router = useRouter();
 
@@ -50,7 +185,6 @@ export default function ProfilePage() {
       }
 
       try {
-
         const docSnap = await getDoc(doc(db, 'users', user.uid));
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -81,26 +215,22 @@ export default function ProfilePage() {
     try {
       const eventsSnap = await getDocs(collection(db, 'events'));
       const registered = [];
-  
+
       for (const docSnap of eventsSnap.docs) {
         const eventData = { id: docSnap.id, ...docSnap.data() };
-  
-        // 🔁 Check from /registrations/{eventId}
         const regDoc = await getDoc(doc(db, 'registrations', docSnap.id));
         const regData = regDoc.exists() ? regDoc.data() : {};
-  
+
         if (regData[uid]) {
           registered.push(eventData);
-        } else {
         }
       }
-  
+
       setRegisteredEvents(registered);
     } catch (err) {
       console.error('Error fetching registered events:', err);
     }
   };
-  
 
   const pickImage = async () => {
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -119,6 +249,7 @@ export default function ProfilePage() {
     if (!result.canceled) {
       const uri = result.assets[0].uri;
       setUserData(prev => ({ ...prev, imageUrl: uri }));
+      setEditing(true);
     }
   };
 
@@ -190,176 +321,63 @@ export default function ProfilePage() {
     }
   };
 
-  const handleCancelEdit = () => {
-    setUserData({ ...originalData });
-    setEditing(false);
-    setError('');
-  };
-
-  const handleCancelPasswordChange = () => {
-    setFormData({ currentPassword: '', newPassword: '' });
-    setChangingPassword(false);
-    setError('');
-  };
-
-  const ProfileRoute = () => (
-    <ScrollView contentContainerStyle={{ padding: 20 }}>
-      <View style={styles.header}>
-        <Text style={styles.title}>My Profile</Text>
-        {!editing && (
-          <TouchableOpacity onPress={() => setEditing(true)}>
-            <Feather name="edit-3" size={22} color="#0055ff" />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <View style={styles.profilePicContainer}>
-        <TouchableOpacity onPress={pickImage}>
-          {userData.imageUrl ? (
-            <Image source={{ uri: userData.imageUrl }} style={styles.profilePic} />
-          ) : (
-            <View style={styles.profilePicPlaceholder}>
-              <Feather name="user" size={40} color="#aaa" />
-            </View>
-          )}
-        </TouchableOpacity>
-        <Text style={{ fontSize: 12, color: '#888', marginTop: 6 }}>
-          Tap to upload/change
-        </Text>
-      </View>
-
-      {error !== '' && <Text style={styles.error}>{error}</Text>}
-
-      <Text style={styles.label}>Full Name</Text>
-      <TextInput
-        style={styles.input}
-        value={userData.fullName}
-        onChangeText={(text) => setUserData({ ...userData, fullName: text })}
-        editable={editing}
-        placeholder="Enter your full name"
-      />
-
-      <Text style={styles.label}>Email</Text>
-      <TextInput
-        style={styles.input}
-        value={userData.email}
-        onChangeText={(text) => setUserData({ ...userData, email: text })}
-        editable={editing}
-        keyboardType="email-address"
-        autoCapitalize="none"
-        placeholder="Enter your email"
-      />
-
-      {editing && (
-        <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
-            <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit}>
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {!changingPassword ? (
-        <TouchableOpacity
-          style={styles.changePasswordBtn}
-          onPress={() => setChangingPassword(true)}
-        >
-          <Text style={styles.changePasswordText}>Change Password</Text>
-        </TouchableOpacity>
-      ) : (
-        <>
-          <Text style={styles.label}>Current Password</Text>
-          <TextInput
-            style={[styles.input, { textAlignVertical: 'center' }]}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            textContentType="password"
-            value={formData.currentPassword}
-            onChangeText={(text) => setFormData({ ...formData, currentPassword: text })}
-            placeholder="Enter current password"
-          />
-
-          <Text style={styles.label}>New Password</Text>
-          <TextInput
-            style={[styles.input, { textAlignVertical: 'center' }]}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            textContentType="password"
-            value={formData.newPassword}
-            onChangeText={(text) => setFormData({ ...formData, newPassword: text })}
-            placeholder="Enter new password"
-          />
-
-          <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.saveButton} onPress={handlePasswordChange}>
-              <Text style={styles.saveButtonText}>Update Password</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelButton} onPress={handleCancelPasswordChange}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
-    </ScrollView>
-  );
-
-  const EventsRoute = () => (
-    <ScrollView contentContainerStyle={{ padding: 20 }}>
-      {registeredEvents.length === 0 ? (
-        <Text style={styles.noEvents}>You have not registered for any events yet.</Text>
-      ) : (
-        registeredEvents.map(event => {
-          const dateObj = new Date(event.date?.seconds * 1000);
-
-          return (
-            <View key={event.id} style={styles.eventCard}>
-              <Image
-                source={event.imageUrl === 'default' || !event.imageUrl
-                  ? require('../assets/images/default-event.png')
-                  : { uri: event.imageUrl }}
-                style={{ width: '100%', height: 160, borderRadius: 10, marginBottom: 10 }}
-              />
-              <Text style={styles.eventTitle}>{event.eventName}</Text>
-              <Text style={styles.eventMeta}>📍 {event.location}</Text>
-              <Text style={styles.eventMeta}>📅 {dateObj.toDateString()} ⏰ {dateObj.toLocaleTimeString()}</Text>
-              <Text style={styles.eventMeta}>👥 Registered</Text>
-            </View>
-          );
-        })
-      )}
-    </ScrollView>
-  );
-
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <TabView
-        navigationState={{ index, routes }}
-        renderScene={SceneMap({ profile: ProfileRoute, events: EventsRoute })}
-        onIndexChange={setIndex}
-        initialLayout={initialLayout}
-        renderTabBar={props => (
-          <TabBar
-            {...props}
-            indicatorStyle={{ backgroundColor: '#0055ff' }}
-            style={{ backgroundColor: '#0055ff', borderBottomWidth: 1, borderBottomColor: '#eee' }}
-            renderLabel={({ route }) => (
-              <Text style={{ color: '#000', fontWeight: '600' }}>{route.title}</Text>
-            )}
-          />
-        )}
-      />
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.tabButtonRow}>
+        <TouchableOpacity onPress={() => setActiveTab('profile')}>
+          <Text style={activeTab === 'profile' ? styles.activeTab : styles.inactiveTab}>Profile</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setActiveTab('events')}>
+          <Text style={activeTab === 'events' ? styles.activeTab : styles.inactiveTab}>My Registrations</Text>
+        </TouchableOpacity>
+      </View>
+
+      {activeTab === 'profile' ? (
+        <ProfileRoute
+          userData={userData}
+          setUserData={setUserData}
+          originalData={originalData}
+          editing={editing}
+          setEditing={setEditing}
+          error={error}
+          setError={setError}
+          saving={saving}
+          handleSave={handleSave}
+          formData={formData}
+          setFormData={setFormData}
+          changingPassword={changingPassword}
+          setChangingPassword={setChangingPassword}
+          handlePasswordChange={handlePasswordChange}
+          pickImage={pickImage}
+        />
+      ) : (
+        <EventsRoute registeredEvents={registeredEvents} />
+      )}
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  tabButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+    backgroundColor: '#f0f0f0',
+  },
+  activeTab: {
+    color: '#0055ff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  inactiveTab: {
+    color: '#666',
+    fontWeight: '500',
+    fontSize: 16,
+  },
+
+
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -416,7 +434,7 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     flex: 1,
-    backgroundColor: '#00b894',
+    backgroundColor: '#0055ff',
     padding: 14,
     borderRadius: 10,
   },
