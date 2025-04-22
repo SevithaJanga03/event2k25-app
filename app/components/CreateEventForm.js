@@ -278,9 +278,9 @@ export default function CreateEventForm() {
             onSelect={(index, value) => handleChange('category', value)}
             adjustFrame={style => ({
               ...style,
-              left: 50, // match horizontal padding of ScrollView
+              left: 55, // match horizontal padding of ScrollView
               width: '70%', // match input width
-              top: style.top + 8, // slight spacing below input
+              top: style.top -20, // slight spacing below input
             })}
           />
           </View>

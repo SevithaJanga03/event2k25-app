@@ -7,7 +7,7 @@ import {
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import {
   collection, query, where, getDocs, orderBy, doc,
-  deleteDoc, updateDoc,
+  deleteDoc, updateDoc, getDoc
 } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 
@@ -19,6 +19,8 @@ export default function MyEventsTab() {
   const [editErrors, setEditErrors] = useState({});
   const [editLoading, setEditLoading] = useState(false);
   const [deleteLoadingId, setDeleteLoadingId] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [registeredUsers, setRegisteredUsers] = useState([]);
 
   useEffect(() => {
     const auth = getAuth();
@@ -27,7 +29,6 @@ export default function MyEventsTab() {
       if (firebaseUser) await fetchEvents(firebaseUser.uid);
       else setLoading(false);
     });
-
     return () => unsubscribe();
   }, []);
 
@@ -40,58 +41,47 @@ export default function MyEventsTab() {
         orderBy('createdAt', 'desc')
       );
       const snapshot = await getDocs(q);
-      const userEvents = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
+      const eventsWithCounts = await Promise.all(snapshot.docs.map(async docSnap => {
+        const data = docSnap.data();
+        const eventDate = data.date?.seconds ? new Date(data.date.seconds * 1000) : null;
+        const isExpired = eventDate && eventDate < new Date();
+
+        const regSnap = await getDoc(doc(db, 'registrations', docSnap.id));
+        const regCount = regSnap.exists() ? Object.keys(regSnap.data()).length : 0;
+
+        return {
+          id: docSnap.id,
+          ...data,
+          registeredCount: regCount,
+          isExpired
+        };
       }));
-      setEvents(userEvents);
+      setEvents(eventsWithCounts);
     } catch (err) {
-      console.error('Error fetching user events:', err);
+      console.error('Error fetching events:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const validateEditForm = () => {
-    const errors = {};
-    if (!editEvent.eventName.trim()) errors.eventName = 'Required';
-    if (!editEvent.description.trim()) errors.description = 'Required';
-    if (!editEvent.location.trim()) errors.location = 'Required';
-
-    const typed = parseInt(editEvent.maxAttendees);
-    const original = editEvent.originalMaxAttendees;
-
-    if (isNaN(typed)) {
-      errors.maxAttendees = 'Must be a number';
-    } else if (typed < original) {
-      errors.maxAttendees = `Cannot be less than current: ${original}`;
-    } else if (typed > 50) {
-      errors.maxAttendees = 'Cannot exceed 50';
-    }
-
-    setEditErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  const handleSaveEdit = async () => {
-    if (!validateEditForm()) return;
-
-    setEditLoading(true);
+  const fetchRegisteredUsers = async (eventId) => {
     try {
-      await updateDoc(doc(db, 'events', editEvent.id), {
-        eventName: editEvent.eventName,
-        description: editEvent.description,
-        location: editEvent.location,
-        maxAttendees: parseInt(editEvent.maxAttendees),
-      });
+      const regSnap = await getDoc(doc(db, 'registrations', eventId));
+      if (!regSnap.exists()) return [];
 
-      setEditEvent(null);
-      ToastAndroid.show('Event updated successfully!', ToastAndroid.SHORT);
-      if (user?.uid) await fetchEvents(user.uid);
+      const userIds = Object.keys(regSnap.data());
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const usersMap = {};
+      usersSnap.forEach(doc => usersMap[doc.id] = doc.data());
+
+      return userIds.map(uid => ({
+        id: uid,
+        fullName: usersMap[uid]?.fullName || 'Unknown',
+        email: usersMap[uid]?.email || 'Unknown',
+      }));
     } catch (err) {
-      Alert.alert('Error', 'Failed to update event.');
-    } finally {
-      setEditLoading(false);
+      console.error('Error fetching registered users:', err);
+      return [];
     }
   };
 
@@ -113,11 +103,21 @@ export default function MyEventsTab() {
             setDeleteLoadingId(null);
           }
         }
-      },
+      }
     ]);
   };
 
+  const handleViewRegistrants = async (eventId) => {
+    const users = await fetchRegisteredUsers(eventId);
+    setRegisteredUsers(users);
+    setModalVisible(true);
+  };
+
   const openEditModal = (item) => {
+    if (item.isExpired) {
+      ToastAndroid.show('⛔ Cannot edit an expired event.', ToastAndroid.SHORT);
+      return;
+    }
     setEditErrors({});
     setEditEvent({
       ...item,
@@ -126,32 +126,84 @@ export default function MyEventsTab() {
     });
   };
 
+  const handleSaveEdit = async () => {
+    const errors = {};
+    if (!editEvent.eventName.trim()) errors.eventName = 'Required';
+    if (!editEvent.description.trim()) errors.description = 'Required';
+    if (!editEvent.location.trim()) errors.location = 'Required';
+    const typed = parseInt(editEvent.maxAttendees);
+    if (isNaN(typed)) errors.maxAttendees = 'Must be a number';
+    else if (typed < editEvent.originalMaxAttendees) errors.maxAttendees = `Cannot be less than current: ${editEvent.originalMaxAttendees}`;
+    else if (typed > 50) errors.maxAttendees = 'Cannot exceed 50';
+
+    setEditErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    setEditLoading(true);
+    try {
+      await updateDoc(doc(db, 'events', editEvent.id), {
+        eventName: editEvent.eventName,
+        description: editEvent.description,
+        location: editEvent.location,
+        maxAttendees: typed,
+      });
+      setEditEvent(null);
+      ToastAndroid.show('Event updated!', ToastAndroid.SHORT);
+      if (user?.uid) await fetchEvents(user.uid);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to update event.');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
   const renderEvent = ({ item }) => {
     const dateObj = item.date?.seconds ? new Date(item.date.seconds * 1000) : new Date();
+    const cardStyle = item.isExpired
+      ? [styles.card, { backgroundColor: '#f0f0f0' }]
+      : styles.card;
 
     return (
-      <View style={styles.card}>
+      <View style={cardStyle}>
         <Image
-          source={
-            item.imageUrl === 'default' || !item.imageUrl
-              ? require('../../assets/images/default-event.png')
-              : { uri: item.imageUrl }
-          }
+          source={item.imageUrl === 'default' || !item.imageUrl
+            ? require('../../assets/images/default-event.png')
+            : { uri: item.imageUrl }}
           style={styles.image}
         />
+        {item.isExpired && (
+      <View style={styles.expiredBadge}>
+        <Text style={styles.expiredText}>Expired</Text>
+      </View>
+    )}
         <Text style={styles.title}>{item.eventName}</Text>
         <Text style={styles.meta}>📍 {item.location}</Text>
-        <Text style={styles.meta}>
-          📅 {dateObj.toDateString()} ⏰ {dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
-        </Text>
+        <Text style={styles.meta}>📅 {dateObj.toDateString()} ⏰ {dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</Text>
+        <Text style={styles.meta}>👥 {item.registeredCount} / {item.maxAttendees || '∞'}</Text>
+
+        <TouchableOpacity
+          onPress={() => handleViewRegistrants(item.id)}
+          style={[
+            styles.registeredUsersBtn,
+            item.isExpired && styles.expiredRegisteredBtn
+          ]}
+          >
+          <Text style={[
+            styles.registeredUsersBtnText,
+            item.isExpired && styles.disabledRegisteredBtnText
+          ]}>
+            View Registered Users ({item.registeredCount})
+          </Text>
+        </TouchableOpacity>
 
         <View style={styles.actions}>
           <TouchableOpacity
             onPress={() => openEditModal(item)}
-            style={[styles.actionBtn, styles.editBtn]}>
+            style={[styles.actionBtn, styles.editBtn]}
+            disabled={item.isExpired}
+          >
             <Text style={styles.btnText}>Edit</Text>
           </TouchableOpacity>
-
           <TouchableOpacity
             onPress={() => handleDelete(item.id)}
             style={[styles.actionBtn, styles.deleteBtn]}
@@ -180,26 +232,37 @@ export default function MyEventsTab() {
           renderItem={renderEvent}
           keyExtractor={item => item.id}
           contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 12 }}
-          showsVerticalScrollIndicator={false}
         />
       )}
 
-      {/* Edit Modal */}
+      {/* Registered Users Modal */}
+      <Modal visible={modalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Registered Users</Text>
+            <ScrollView style={{ maxHeight: 300 }}>
+              {registeredUsers.length > 0 ? registeredUsers.map(user => (
+                <Text key={user.id} style={styles.userItem}>
+                  • {user.fullName} ({user.email})
+                </Text>
+              )) : <Text style={{ color: '#666' }}>No users found.</Text>}
+            </ScrollView>
+            <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.closeBtn}>
+              <Text style={styles.btnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Edit Event Modal */}
       <Modal visible={!!editEvent} transparent animationType="slide">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
-          <View style={styles.modalContent}>
-            <ScrollView
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: 24 }}
-              showsVerticalScrollIndicator={false}
-            >
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }}>
               <Text style={styles.modalTitle}>Edit Event</Text>
 
               {['eventName', 'description', 'location'].map(field => (
-                <View key={field} style={styles.fieldWrap}>
+                <View key={field} style={{ marginBottom: 10 }}>
                   <Text style={styles.label}>{field.replace(/([A-Z])/g, ' $1')}</Text>
                   <TextInput
                     style={styles.modalInput}
@@ -210,7 +273,7 @@ export default function MyEventsTab() {
                 </View>
               ))}
 
-              <View style={styles.fieldWrap}>
+              <View style={{ marginBottom: 14 }}>
                 <Text style={styles.label}>Max Attendees</Text>
                 <TextInput
                   editable={editEvent?.originalMaxAttendees < 50}
@@ -229,19 +292,15 @@ export default function MyEventsTab() {
                 )}
               </View>
 
-              <View style={styles.modalActions}>
+              <View style={styles.actions}>
                 <TouchableOpacity
-                  style={styles.saveBtn}
+                  style={[styles.actionBtn, styles.editBtn]}
                   onPress={handleSaveEdit}
                   disabled={editLoading}
                 >
                   {editLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Save</Text>}
                 </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.cancelBtn}
-                  onPress={() => setEditEvent(null)}
-                >
+                <TouchableOpacity style={[styles.actionBtn, styles.deleteBtn]} onPress={() => setEditEvent(null)}>
                   <Text style={styles.btnText}>Cancel</Text>
                 </TouchableOpacity>
               </View>
@@ -256,41 +315,67 @@ export default function MyEventsTab() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff', paddingTop: 10 },
   card: {
-    backgroundColor: '#fff',
-    padding: 16,
-    marginBottom: 14,
-    marginHorizontal: 12,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    backgroundColor: '#fff', padding: 16, marginBottom: 14, marginHorizontal: 12,
+    borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 }, elevation: 3,
   },
+  topRow: { position: 'relative' },
+expiredBadge: {
+  position: 'absolute',
+  top: 8,
+  right: 8,
+  backgroundColor: '#d9534f',
+  paddingHorizontal: 8,
+  paddingVertical: 4,
+  borderRadius: 6,
+},
+expiredText: {
+  color: '#fff',
+  fontSize: 11,
+  fontWeight: 'bold',
+},
   image: { width: '100%', height: 160, borderRadius: 10, marginBottom: 10, backgroundColor: '#e0e0e0' },
   title: { fontSize: 18, fontWeight: '600', marginBottom: 4, color: '#333' },
   meta: { fontSize: 14, color: '#666', marginBottom: 2 },
+  viewUsers: { marginTop: 10, color: '#0055ff', fontWeight: '600' },
   noEvents: { textAlign: 'center', marginTop: 60, fontSize: 16, color: '#999' },
-
   actions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   actionBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 4 },
   editBtn: { backgroundColor: '#888' },
   deleteBtn: { backgroundColor: '#0055ff' },
   btnText: { color: '#fff', fontWeight: '600' },
-
-  modalOverlay: {
-    flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  modalContent: {
-    width: '90%', backgroundColor: '#fff', padding: 20, borderRadius: 16,
-    shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5,
-  },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
-  label: { fontWeight: '600', marginBottom: 4, color: '#333' },
+  modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalBox: { width: '85%', backgroundColor: '#fff', padding: 20, borderRadius: 16, maxHeight: '75%' },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
+  userItem: { fontSize: 15, marginBottom: 6, color: '#333' },
+  closeBtn: { marginTop: 16, backgroundColor: '#0055ff', borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
   modalInput: { backgroundColor: '#f4f4f4', borderRadius: 8, padding: 10, fontSize: 14 },
+  label: { fontWeight: '600', marginBottom: 4, color: '#333' },
   error: { color: 'red', fontSize: 13, marginTop: 4 },
-  modalActions: { flexDirection: 'row', marginTop: 20, justifyContent: 'space-between' },
-  saveBtn: { backgroundColor: '#0055ff', flex: 1, marginRight: 6, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  cancelBtn: { backgroundColor: '#999', flex: 1, marginLeft: 6, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  fieldWrap: { marginBottom: 14 },
+  
+  disabledRegisteredBtnText: {
+    color: '#888',
+  },
+  registeredUsersBtn: {
+    marginTop: 12,
+    backgroundColor: '#f6f6f6',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  
+  expiredRegisteredBtn: {
+    backgroundColor: '#e0e0e0',  // match expired card
+    borderColor: '#c0c0c0',
+  },
+  
+  registeredUsersBtnText: {
+    color: '#666',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  
+  
 });
