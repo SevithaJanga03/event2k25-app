@@ -64,10 +64,10 @@ const ProfileRoute = ({
 
     <Text style={styles.label}>Email</Text>
     <TextInput
-      style={styles.input}
+      style={styles.email}
       value={userData.email}
       onChangeText={(text) => setUserData({ ...userData, email: text })}
-      editable={editing}
+      editable={false}
       keyboardType="email-address"
       autoCapitalize="none"
       placeholder="Enter your email"
@@ -442,6 +442,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 16,
     backgroundColor: '#f9f9f9',
+    marginBottom: 16,
+  },
+  email:{
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    backgroundColor: '#e0e0e0',
     marginBottom: 16,
   },
   buttonRow: {

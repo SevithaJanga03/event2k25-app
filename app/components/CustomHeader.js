@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, Image, StyleSheet, ToastAndroid } from 'react-native';
+import { View, Text, TouchableOpacity, Image, StyleSheet, ToastAndroid, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { auth } from '../../firebaseConfig';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -18,19 +18,33 @@ export default function CustomHeader() {
 
   const handleAuth = () => {
     if (user) {
-      signOut(auth)
-        .then(() => {
-          ToastAndroid.show('You have been logged out.', ToastAndroid.SHORT);
-          router.replace('/'); // ✅ Redirect to Explore (or home)
-        })
-        .catch((err) => {
-          console.error('Logout error:', err);
-          ToastAndroid.show('Logout failed.', ToastAndroid.SHORT);
-        });
+      Alert.alert(
+        'Confirm Logout',
+        'Do you really want to log out?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Logout',
+            style: 'destructive',
+            onPress: () => {
+              signOut(auth)
+                .then(() => {
+                  ToastAndroid.show('You have been logged out.', ToastAndroid.SHORT);
+                  router.replace('/');
+                })
+                .catch((err) => {
+                  console.error('Logout error:', err);
+                  ToastAndroid.show('Logout failed.', ToastAndroid.SHORT);
+                });
+            }
+          }
+        ]
+      );
     } else {
       router.push('/auth');
     }
   };
+  
 
   return (
     <View style={styles.header}>
