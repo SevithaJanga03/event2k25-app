@@ -1,11 +1,15 @@
+// app/_layout.js
 import { Slot, usePathname } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
-  View, StyleSheet, Platform, StatusBar,
+  View,
+  StyleSheet,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import CustomHeader from './components/CustomHeader';
 import CustomBottomTabs from './components/CustomBottomTabs';
+import { ChatProvider } from './ChatContext';   // ← import here
 
 function AppLayoutContent() {
   const insets = useSafeAreaInsets();
@@ -28,7 +32,10 @@ export default function Layout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <AppLayoutContent />
+        {/* Wrap your entire app so chat state persists across screens */}
+        <ChatProvider>
+          <AppLayoutContent />
+        </ChatProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
